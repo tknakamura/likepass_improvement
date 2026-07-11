@@ -11,9 +11,10 @@ export default async function MePage() {
   const session = await auth();
   if (!session?.user?.id) redirect("/signin");
 
-  const [posts, votes] = await Promise.all([
+  const [posts, votes, likes] = await Promise.all([
     prisma.content.count({ where: { userId: session.user.id, status: { not: "DELETED" } } }),
     prisma.vote.count({ where: { userId: session.user.id } }),
+    prisma.vote.count({ where: { userId: session.user.id, value: "LIKE" } }),
   ]);
 
   const username = session.user.username ?? "user";
@@ -25,6 +26,12 @@ export default async function MePage() {
       label: "自分の投稿",
       description: `${posts} 件`,
       icon: Images,
+    },
+    {
+      href: "/me/likes",
+      label: "LIKEした画像",
+      description: `${likes} 件`,
+      icon: Heart,
     },
     {
       href: "/me/votes",
