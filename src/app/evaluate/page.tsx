@@ -150,48 +150,11 @@ export default function EvaluatePage() {
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-lg">
-      <div className="mb-4 space-y-3">
-        <div className="flex items-center justify-between text-sm">
-          <p className="font-medium">評価するタグ</p>
-          {evaluatedCount !== null && (
-            <p className="text-[var(--muted-foreground)] tabular-nums">
-              評価済み <span className="font-medium text-[var(--foreground)]">{evaluatedCount}</span> 件
-            </p>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={clearTags}
-            className={`px-3 py-1 rounded-full text-sm border ${
-              selectedTagSlugs.size === 0
-                ? "bg-[var(--primary)] text-[var(--primary-foreground)] border-transparent"
-                : "border-[var(--border)]"
-            }`}
-          >
-            すべて
-          </button>
-          {tags.map((tag) => (
-            <button
-              key={tag.id}
-              type="button"
-              onClick={() => toggleTag(tag.slug)}
-              className={`px-3 py-1 rounded-full text-sm border ${
-                selectedTagSlugs.has(tag.slug)
-                  ? "bg-[var(--primary)] text-[var(--primary-foreground)] border-transparent"
-                  : "border-[var(--border)]"
-              }`}
-            >
-              #{tag.slug}
-            </button>
-          ))}
-        </div>
-        <p className="text-xs text-[var(--muted-foreground)]">
-          {selectedTagSlugs.size === 0
-            ? "タグ未選択 — すべてのタグから評価します"
-            : `${selectedTagSlugs.size}件選択中 — ${filterLabel} の写真を優先して表示`}
+      {evaluatedCount !== null && (
+        <p className="mb-4 text-sm text-right text-[var(--muted-foreground)] tabular-nums">
+          評価済み <span className="font-medium text-[var(--foreground)]">{evaluatedCount}</span> 件
         </p>
-      </div>
+      )}
 
       <Card className="overflow-hidden">
         <CardContent className="p-0">
@@ -203,7 +166,7 @@ export default function EvaluatePage() {
                 {loading
                   ? "読み込み中..."
                   : selectedTagSlugs.size > 0
-                    ? "選択したタグで評価できる写真がありません。タグを変えるか「すべて」を選んでください。"
+                    ? "選択したタグで評価できる写真がありません。下のタグを変えるか「すべて」を選んでください。"
                     : "評価できる写真がありません"}
               </p>
             )}
@@ -241,6 +204,42 @@ export default function EvaluatePage() {
         <Button size="lg" disabled={!content || loading} onClick={() => vote("LIKE")}>
           LIKE
         </Button>
+      </div>
+
+      <div className="mt-8 pt-6 border-t border-[var(--border)] space-y-3">
+        <p className="text-sm font-medium">評価するタグ</p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={clearTags}
+            className={`px-3 py-1 rounded-full text-sm border ${
+              selectedTagSlugs.size === 0
+                ? "bg-[var(--primary)] text-[var(--primary-foreground)] border-transparent"
+                : "border-[var(--border)]"
+            }`}
+          >
+            すべて
+          </button>
+          {tags.map((tag) => (
+            <button
+              key={tag.id}
+              type="button"
+              onClick={() => toggleTag(tag.slug)}
+              className={`px-3 py-1 rounded-full text-sm border ${
+                selectedTagSlugs.has(tag.slug)
+                  ? "bg-[var(--primary)] text-[var(--primary-foreground)] border-transparent"
+                  : "border-[var(--border)]"
+              }`}
+            >
+              #{tag.slug}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-[var(--muted-foreground)]">
+          {selectedTagSlugs.size === 0
+            ? "タグ未選択 — すべてのタグから評価します"
+            : `${selectedTagSlugs.size}件選択中 — ${filterLabel} の写真を優先して表示`}
+        </p>
       </div>
     </div>
   );
