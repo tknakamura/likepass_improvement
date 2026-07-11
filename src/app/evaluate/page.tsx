@@ -5,6 +5,12 @@ import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 
+interface Tag {
+  id: string;
+  slug: string;
+  displayName: string;
+}
+
 interface EvalContent {
   id: string;
   imageUrl: string | null;
@@ -23,7 +29,12 @@ interface VoteFeedback {
   unlockedRankings: UnlockedRanking[];
 }
 
+const TAG_FILTER_STORAGE_KEY = "likepass-eval-tag-slugs";
+
 export default function EvaluatePage() {
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [selectedTagSlugs, setSelectedTagSlugs] = useState<Set<string>>(new Set());
+  const [tagsReady, setTagsReady] = useState(false);
   const [content, setContent] = useState<EvalContent | null>(null);
   const [feedback, setFeedback] = useState<VoteFeedback | null>(null);
   const [evaluatedCount, setEvaluatedCount] = useState<number | null>(null);
@@ -31,20 +42,53 @@ export default function EvaluatePage() {
   const [sessionId] = useState(() => crypto.randomUUID());
   const [shownAt, setShownAt] = useState<number>(Date.now());
 
+  useEffect(() => {
+    const stored = localStorage.getItem(TAG_FILTER_STORAGE_KEY);
+    const storedSlugs = stored ? (JSON.parse(stored) as string[]) : null;
+
+    Promise.all([fetch("/api/tags").then((r) => r.json()), fetch("/api/me/tag-preferences").then((r) => r.json())])
+      .then(([tagData, prefData]) => {
+        const availableTags: Tag[] = tagData.tags ?? [];
+        setTags(availableTags);
+
+        const validSlugs = new Set(availableTags.map((t) => t.slug));
+        const preferredSlugs = (prefData.preferences ?? [])
+          .map((p: { slug: string }) => p.slug)
+          .filter((slug: string) => validSlugs.has(slug));
+
+        const initial =
+          storedSlugs?.filter((slug) => validSlugs.has(slug)) ??
+          preferredSlugs;
+
+        setSelectedTagSlugs(new Set(initial));
+        setTagsReady(true);
+      })
+      .catch(() => setTagsReady(true));
+  }, []);
+
+  useEffect(() => {
+    if (!tagsReady) return;
+    localStorage.setItem(TAG_FILTER_STORAGE_KEY, JSON.stringify([...selectedTagSlugs]));
+  }, [selectedTagSlugs, tagsReady]);
+
   const loadNext = useCallback(async () => {
     setLoading(true);
     setFeedback(null);
     const params = new URLSearchParams({ sessionId });
+    for (const slug of selectedTagSlugs) {
+      params.append("tags", slug);
+    }
     const res = await fetch(`/api/evaluation/next?${params}`);
     const data = await res.json();
     setContent(data.content);
     setShownAt(Date.now());
     setLoading(false);
-  }, [sessionId]);
+  }, [sessionId, selectedTagSlugs]);
 
   useEffect(() => {
+    if (!tagsReady) return;
     loadNext();
-  }, [loadNext]);
+  }, [loadNext, tagsReady]);
 
   const refreshEvaluatedCount = useCallback(() => {
     fetch("/api/me/stats")
@@ -56,6 +100,19 @@ export default function EvaluatePage() {
   useEffect(() => {
     refreshEvaluatedCount();
   }, [refreshEvaluatedCount]);
+
+  function toggleTag(slug: string) {
+    setSelectedTagSlugs((prev) => {
+      const next = new Set(prev);
+      if (next.has(slug)) next.delete(slug);
+      else next.add(slug);
+      return next;
+    });
+  }
+
+  function clearTags() {
+    setSelectedTagSlugs(new Set());
+  }
 
   async function vote(value: "LIKE" | "PASS") {
     if (!content) return;
@@ -86,19 +143,54 @@ export default function EvaluatePage() {
     }
   }
 
+  const filterLabel =
+    selectedTagSlugs.size === 0
+      ? "すべてのタグ"
+      : [...selectedTagSlugs].map((slug) => `#${slug}`).join(" · ");
+
   return (
     <div className="container mx-auto px-4 py-8 max-w-lg">
-      <div className="flex items-center justify-between mb-4 text-sm">
-        {content?.contextTag ? (
-          <p className="text-[var(--muted-foreground)]">#{content.contextTag.slug} の写真を評価中</p>
-        ) : (
-          <span />
-        )}
-        {evaluatedCount !== null && (
-          <p className="text-[var(--muted-foreground)] tabular-nums">
-            評価済み <span className="font-medium text-[var(--foreground)]">{evaluatedCount}</span> 件
-          </p>
-        )}
+      <div className="mb-4 space-y-3">
+        <div className="flex items-center justify-between text-sm">
+          <p className="font-medium">評価するタグ</p>
+          {evaluatedCount !== null && (
+            <p className="text-[var(--muted-foreground)] tabular-nums">
+              評価済み <span className="font-medium text-[var(--foreground)]">{evaluatedCount}</span> 件
+            </p>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={clearTags}
+            className={`px-3 py-1 rounded-full text-sm border ${
+              selectedTagSlugs.size === 0
+                ? "bg-[var(--primary)] text-[var(--primary-foreground)] border-transparent"
+                : "border-[var(--border)]"
+            }`}
+          >
+            すべて
+          </button>
+          {tags.map((tag) => (
+            <button
+              key={tag.id}
+              type="button"
+              onClick={() => toggleTag(tag.slug)}
+              className={`px-3 py-1 rounded-full text-sm border ${
+                selectedTagSlugs.has(tag.slug)
+                  ? "bg-[var(--primary)] text-[var(--primary-foreground)] border-transparent"
+                  : "border-[var(--border)]"
+              }`}
+            >
+              #{tag.slug}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-[var(--muted-foreground)]">
+          {selectedTagSlugs.size === 0
+            ? "タグ未選択 — すべてのタグから評価します"
+            : `${selectedTagSlugs.size}件選択中 — ${filterLabel} の写真を優先して表示`}
+        </p>
       </div>
 
       <Card className="overflow-hidden">
@@ -107,11 +199,23 @@ export default function EvaluatePage() {
             {content?.imageUrl ? (
               <Image src={content.imageUrl} alt="評価対象" fill className="object-contain" unoptimized />
             ) : (
-              <p className="text-[var(--muted-foreground)]">{loading ? "読み込み中..." : "評価できる写真がありません"}</p>
+              <p className="text-[var(--muted-foreground)] px-4 text-center">
+                {loading
+                  ? "読み込み中..."
+                  : selectedTagSlugs.size > 0
+                    ? "選択したタグで評価できる写真がありません。タグを変えるか「すべて」を選んでください。"
+                    : "評価できる写真がありません"}
+              </p>
             )}
           </div>
         </CardContent>
       </Card>
+
+      {content?.contextTag && (
+        <p className="mt-2 text-sm text-center text-[var(--muted-foreground)]">
+          #{content.contextTag.slug} の写真を評価中
+        </p>
+      )}
 
       {feedback && (
         <div className="mt-3 space-y-2 text-center">

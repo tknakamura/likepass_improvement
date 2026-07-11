@@ -9,7 +9,7 @@ export interface QueueContext {
   preferences: UserTagPreference[];
   votedContentIds: Set<string>;
   sessionHistory: string[];
-  tagSlug?: string;
+  tagSlugs?: string[];
 }
 
 const POOL_WEIGHTS = {
@@ -36,9 +36,10 @@ export function isExcludedFromQueue(
     return true;
   }
 
-  if (context.tagSlug) {
+  if (context.tagSlugs && context.tagSlugs.length > 0) {
+    const slugSet = new Set(context.tagSlugs);
     const hasActiveTag = content.contentTags.some(
-      (ct) => ct.tag.slug === context.tagSlug && ct.status === "ACTIVE"
+      (ct) => slugSet.has(ct.tag.slug) && ct.status === "ACTIVE"
     );
     if (!hasActiveTag) return true;
   }

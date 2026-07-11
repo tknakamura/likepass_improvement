@@ -34,6 +34,43 @@ describe("isExcludedFromQueue", () => {
     const c = makeCandidate({ id: "c1", userId: "u2", status: "DORMANT" });
     expect(isExcludedFromQueue(c, { userId: "u1", preferences: [], votedContentIds: new Set(), sessionHistory: [] })).toBe(true);
   });
+
+  it("excludes content without selected tags", () => {
+    const c = makeCandidate({
+      id: "c1",
+      userId: "u2",
+      contentTags: [{ tag: { slug: "street", id: "t1" }, tagId: "t1", status: "ACTIVE" } as QueueCandidate["contentTags"][0]],
+    });
+    expect(
+      isExcludedFromQueue(c, {
+        userId: "u1",
+        preferences: [],
+        votedContentIds: new Set(),
+        sessionHistory: [],
+        tagSlugs: ["ramen"],
+      })
+    ).toBe(true);
+  });
+
+  it("includes content matching any selected tag", () => {
+    const c = makeCandidate({
+      id: "c1",
+      userId: "u2",
+      contentTags: [
+        { tag: { slug: "street", id: "t1" }, tagId: "t1", status: "ACTIVE" } as QueueCandidate["contentTags"][0],
+        { tag: { slug: "ramen", id: "t2" }, tagId: "t2", status: "ACTIVE" } as QueueCandidate["contentTags"][0],
+      ],
+    });
+    expect(
+      isExcludedFromQueue(c, {
+        userId: "u1",
+        preferences: [],
+        votedContentIds: new Set(),
+        sessionHistory: [],
+        tagSlugs: ["ramen", "night"],
+      })
+    ).toBe(false);
+  });
 });
 
 describe("selectNextContent", () => {
