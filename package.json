@@ -6,6 +6,7 @@
     "dev": "next dev -H 0.0.0.0 -p 3000",
     "build": "prisma generate && next build",
     "start": "next start -H 0.0.0.0",
+    "preview": "npm run build && npm run start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
