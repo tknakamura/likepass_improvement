@@ -133,7 +133,7 @@ export class OpenAIImageAnalysisProvider implements ImageAnalysisProvider {
             {
               role: "user",
               content: [
-                { type: "text", content: buildImageAnalysisUserPrompt(context?.knownTags) },
+                { type: "text", text: buildImageAnalysisUserPrompt(context?.knownTags) },
                 {
                   type: "image_url",
                   image_url: {
