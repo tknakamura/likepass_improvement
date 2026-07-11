@@ -13,14 +13,33 @@
 - **Jobs**: pg-boss (Background Worker)
 - **Hosting**: Render
 
-## セットアップ
+## セットアップ（自分のPCで見る場合）
+
+**重要:** Cloud Agent 上で起動したサーバーは、あなたのPCの `localhost` からは見えません。
+自分のPCで見るには、以下をローカルで実行してください。
+
+### いちばん簡単な方法（Docker あり）
+
+```bash
+git clone https://github.com/tknakamura/likepass_improvement.git
+cd likepass_improvement
+git checkout cursor/likepass-mvp-df00
+
+chmod +x scripts/dev-local.sh
+./scripts/dev-local.sh
+```
+
+ブラウザで **http://localhost:3000** を開く。
+
+### 手動セットアップ
 
 ```bash
 cp .env.example .env
-# .env に DATABASE_URL, AUTH_SECRET, Google OAuth 等を設定
+# DATABASE_URL と AUTH_SECRET を設定（Google OAuth は後からでも可）
 
+docker compose up -d postgres   # または手元の PostgreSQL
 npm install
-npx prisma migrate dev
+npx prisma migrate deploy
 npm run db:seed
 npm run dev
 ```
@@ -30,6 +49,15 @@ npm run dev
 ```bash
 npm run worker
 ```
+
+### うまく見えないとき
+
+| 症状 | 対処 |
+|------|------|
+| 接続できない | `npm run dev` が動いているか確認（`0.0.0.0:3000` で待受） |
+| DB エラー | `docker compose up -d postgres` または PostgreSQL 起動 |
+| ログインできない | `.env` に Google OAuth の ID/Secret を設定 |
+| Cloud Agent の作業を見たい | Cursor の **Ports** タブで 3000 番の転送 URL を開く |
 
 ## 主要コマンド
 
