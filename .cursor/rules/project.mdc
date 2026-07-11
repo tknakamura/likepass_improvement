@@ -1,0 +1,14 @@
+---
+description: LIKEPASS project conventions
+alwaysApply: true
+---
+
+# LIKEPASS Project Rules
+
+- TypeScript strict mode; avoid `any`
+- Validate inputs with Zod
+- Authorization on server, not UI only
+- Ranking logic in pure functions under `src/server/services/ranking/`
+- External services via adapter interfaces (`src/lib/ai/`, `src/lib/r2/`)
+- Do not leak locked ranking image URLs or content IDs to unauthenticated/unvoted clients
+- Never commit secrets

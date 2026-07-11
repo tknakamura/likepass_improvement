@@ -1,0 +1,11 @@
+---
+description: LIKEPASS testing rules
+alwaysApply: true
+---
+
+# Testing
+
+- Unit tests for Wilson score, ranking score, DORMANT rules, queue exclusion
+- Integration tests for vote aggregates and ranking unlock API
+- E2E with Playwright for public flows; mock OAuth in test env
+- Run `npm run test` before PR

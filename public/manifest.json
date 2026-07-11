@@ -1,0 +1,10 @@
+{
+  "name": "LIKEPASS",
+  "short_name": "LIKEPASS",
+  "description": "素敵な画像を、みんなの審美眼で見つける。",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fafafa",
+  "theme_color": "#e11d48",
+  "icons": []
+}

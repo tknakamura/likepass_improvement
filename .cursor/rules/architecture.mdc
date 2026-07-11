@@ -1,0 +1,13 @@
+---
+description: LIKEPASS architecture
+alwaysApply: true
+---
+
+# Architecture
+
+- Next.js App Router with Route Handlers for API
+- PostgreSQL + Prisma for data
+- Auth.js database sessions
+- Cloudflare R2 for images (presigned upload)
+- pg-boss worker on Render for async jobs
+- Feature modules under `src/features/` and domain logic under `src/server/services/`
