@@ -18,11 +18,10 @@ export default function EvaluatePage() {
   const [sessionId] = useState(() => crypto.randomUUID());
   const [shownAt, setShownAt] = useState<number>(Date.now());
 
-  const loadNext = useCallback(async (tagSlug?: string) => {
+  const loadNext = useCallback(async () => {
     setLoading(true);
     setResult(null);
     const params = new URLSearchParams({ sessionId });
-    if (tagSlug) params.set("tagSlug", tagSlug);
     const res = await fetch(`/api/evaluation/next?${params}`);
     const data = await res.json();
     setContent(data.content);

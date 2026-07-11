@@ -1,5 +1,5 @@
 import { PrismaClient, TagCategory } from "@prisma/client";
-import { computeLikeRate, wilsonLowerBound } from "../src/server/services/ranking/scoring";
+import { computeLikeRate, wilsonLowerBound, computeRankingScore } from "../src/server/services/ranking/scoring";
 
 const prisma = new PrismaClient();
 
@@ -45,6 +45,21 @@ const DEMO_IMAGES: {
   { seed: "lp-active-03", tags: ["sunset", "beach"], status: "ACTIVE", likeCount: 38, passCount: 12 },
   { seed: "lp-active-04", tags: ["architecture", "minimal"], status: "ACTIVE", likeCount: 48, passCount: 7 },
   { seed: "lp-active-05", tags: ["ramen", "tokyo", "night"], status: "ACTIVE", likeCount: 33, passCount: 9 },
+  { seed: "lp-active-06", tags: ["street", "night"], status: "ACTIVE", likeCount: 45, passCount: 6 },
+  { seed: "lp-active-07", tags: ["street", "tokyo"], status: "ACTIVE", likeCount: 40, passCount: 8 },
+  { seed: "lp-active-08", tags: ["street", "minimal"], status: "ACTIVE", likeCount: 36, passCount: 10 },
+  { seed: "lp-active-09", tags: ["street", "night", "tokyo"], status: "ACTIVE", likeCount: 52, passCount: 5 },
+  { seed: "lp-active-10", tags: ["street"], status: "ACTIVE", likeCount: 28, passCount: 11 },
+  { seed: "lp-active-11", tags: ["dog", "street"], status: "ACTIVE", likeCount: 44, passCount: 7 },
+  { seed: "lp-active-12", tags: ["cat", "street"], status: "ACTIVE", likeCount: 31, passCount: 9 },
+  { seed: "lp-active-13", tags: ["night", "street"], status: "ACTIVE", likeCount: 39, passCount: 8 },
+  { seed: "lp-active-14", tags: ["sunset", "beach"], status: "ACTIVE", likeCount: 47, passCount: 6 },
+  { seed: "lp-active-15", tags: ["beach", "minimal"], status: "ACTIVE", likeCount: 35, passCount: 10 },
+  { seed: "lp-active-16", tags: ["cafe", "minimal"], status: "ACTIVE", likeCount: 29, passCount: 12 },
+  { seed: "lp-active-17", tags: ["architecture", "tokyo"], status: "ACTIVE", likeCount: 41, passCount: 7 },
+  { seed: "lp-active-18", tags: ["mountain", "sunset"], status: "ACTIVE", likeCount: 37, passCount: 9 },
+  { seed: "lp-active-19", tags: ["ramen", "tokyo"], status: "ACTIVE", likeCount: 43, passCount: 8 },
+  { seed: "lp-active-20", tags: ["dog", "beach"], status: "ACTIVE", likeCount: 50, passCount: 6 },
 ];
 
 const DEFAULT_CONFIG = {
@@ -180,6 +195,40 @@ async function seedDemoContent(posterId: string) {
   return created;
 }
 
+async function assignRanks() {
+  const tags = await prisma.tag.findMany();
+  for (const tag of tags) {
+    const contentTags = await prisma.contentTag.findMany({
+      where: { tagId: tag.id, status: "ACTIVE", content: { status: "ACTIVE" } },
+      include: { content: true },
+    });
+
+    const eligible = contentTags
+      .filter((ct) => ct.content.voteCount >= 20 && ct.content.likeCount >= 5)
+      .sort((a, b) => {
+        const scoreA = computeRankingScore({
+          likeCount: a.content.likeCount,
+          passCount: a.content.passCount,
+        });
+        const scoreB = computeRankingScore({
+          likeCount: b.content.likeCount,
+          passCount: b.content.passCount,
+        });
+        return scoreB - scoreA;
+      });
+
+    for (let i = 0; i < eligible.length; i++) {
+      await prisma.contentTag.update({
+        where: { id: eligible[i].id },
+        data: { currentRank: i + 1, rankingScore: computeRankingScore({
+          likeCount: eligible[i].content.likeCount,
+          passCount: eligible[i].content.passCount,
+        }) },
+      });
+    }
+  }
+}
+
 async function main() {
   for (const tag of SEED_TAGS) {
     await prisma.tag.upsert({
@@ -197,6 +246,7 @@ async function main() {
 
   const { poster } = await seedDemoUsers();
   const contentCount = await seedDemoContent(poster.id);
+  await assignRanks();
 
   console.log("Seed completed:", SEED_TAGS.length, "tags,", contentCount, "demo images");
 }

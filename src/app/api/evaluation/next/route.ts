@@ -11,7 +11,6 @@ export async function GET(request: Request) {
   }
 
   const { searchParams } = new URL(request.url);
-  const tagSlug = searchParams.get("tagSlug") ?? undefined;
   const sessionId = searchParams.get("sessionId") ?? undefined;
 
   const [votes, preferences, candidates] = await Promise.all([
@@ -43,16 +42,13 @@ export async function GET(request: Request) {
     preferences,
     votedContentIds: buildVotedSet(votes),
     sessionHistory: impressions.map((i) => i.contentId),
-    tagSlug,
   });
 
   if (!selected) {
     return NextResponse.json({ content: null });
   }
 
-  const contextTag = tagSlug
-    ? selected.contentTags.find((ct) => ct.tag.slug === tagSlug)?.tag
-    : selected.contentTags[0]?.tag;
+  const contextTag = selected.contentTags[0]?.tag;
 
   const imageKey = selected.mediumObjectKey ?? selected.largeObjectKey ?? selected.thumbnailObjectKey;
 

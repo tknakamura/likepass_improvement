@@ -61,16 +61,17 @@ export async function GET(
     };
   });
 
-  const topN = 10;
-  const unlockedInTop = items.slice(0, topN).filter((i) => i.isUnlocked).length;
+  const topN = 50;
+  const displayItems = items.slice(0, topN);
+  const unlockedInTop = displayItems.filter((i) => i.isUnlocked).length;
 
   return NextResponse.json({
     tag: { slug: tag.slug, displayName: tag.displayName },
     period: "ALL_TIME",
-    items,
+    items: displayItems,
     progress: {
       unlocked: unlockedInTop,
-      total: Math.min(topN, items.length),
+      total: displayItems.length,
     },
   });
 }
