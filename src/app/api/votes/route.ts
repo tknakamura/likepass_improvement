@@ -3,6 +3,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { updateVoteAggregates } from "@/server/services/content/aggregates";
+import { getUnlockedRankingsForVote } from "@/server/services/ranking/unlock";
 import { enqueueJob } from "@/lib/jobs";
 
 const schema = z.object({
@@ -80,6 +81,11 @@ export async function POST(request: Request) {
     await enqueueJob("recalculate_ranking", { tagId });
   }
 
+  const unlockedRankings = await getUnlockedRankingsForVote(
+    session.user.id,
+    parsed.data.contentId
+  );
+
   return NextResponse.json({
     vote: { contentId: vote.contentId, value: vote.value, undoUntil: Date.now() + UNDO_WINDOW_MS },
     result: {
@@ -88,6 +94,7 @@ export async function POST(request: Request) {
       likeRate: updated?.likeRate ?? 0,
       rankingStatus: updated?.status ?? "EXPLORING",
     },
+    unlockedRankings,
     next: { prefetch: true },
   });
 }

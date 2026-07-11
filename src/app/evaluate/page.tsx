@@ -11,16 +11,28 @@ interface EvalContent {
   contextTag: { id: string; slug: string; displayName: string } | null;
 }
 
+interface UnlockedRanking {
+  tagSlug: string;
+  displayName: string;
+  rank: number;
+}
+
+interface VoteFeedback {
+  likeRate: number;
+  voteCount: number;
+  unlockedRankings: UnlockedRanking[];
+}
+
 export default function EvaluatePage() {
   const [content, setContent] = useState<EvalContent | null>(null);
-  const [result, setResult] = useState<{ likeRate: number; voteCount: number } | null>(null);
+  const [feedback, setFeedback] = useState<VoteFeedback | null>(null);
   const [loading, setLoading] = useState(false);
   const [sessionId] = useState(() => crypto.randomUUID());
   const [shownAt, setShownAt] = useState<number>(Date.now());
 
   const loadNext = useCallback(async () => {
     setLoading(true);
-    setResult(null);
+    setFeedback(null);
     const params = new URLSearchParams({ sessionId });
     const res = await fetch(`/api/evaluation/next?${params}`);
     const data = await res.json();
@@ -49,11 +61,13 @@ export default function EvaluatePage() {
     });
     const data = await res.json();
     if (res.ok) {
-      setResult({
+      setFeedback({
         likeRate: data.result.likeRate,
         voteCount: (data.result.likeCount ?? 0) + (data.result.passCount ?? 0),
+        unlockedRankings: data.unlockedRankings ?? [],
       });
-      setTimeout(() => loadNext(), 1000);
+      const delay = data.unlockedRankings?.length > 0 ? 1800 : 1000;
+      setTimeout(() => loadNext(), delay);
     } else {
       setLoading(false);
     }
@@ -79,10 +93,21 @@ export default function EvaluatePage() {
         </CardContent>
       </Card>
 
-      {result && (
-        <p className="text-center text-sm mt-2 text-[var(--muted-foreground)]">
-          LIKE率 {(result.likeRate * 100).toFixed(1)}% · {result.voteCount} 票
-        </p>
+      {feedback && (
+        <div className="mt-3 space-y-2 text-center">
+          <p className="text-sm text-[var(--muted-foreground)]">
+            LIKE率 {(feedback.likeRate * 100).toFixed(1)}% · {feedback.voteCount} 票
+          </p>
+          {feedback.unlockedRankings.length > 0 && (
+            <div className="rounded-lg bg-[var(--primary)]/10 border border-[var(--primary)]/30 px-3 py-2 space-y-1">
+              {feedback.unlockedRankings.map((u) => (
+                <p key={`${u.tagSlug}-${u.rank}`} className="text-sm font-medium text-[var(--primary)]">
+                  #{u.tagSlug} {u.rank}位が開放！
+                </p>
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       <div className="flex gap-4 mt-6 justify-center">

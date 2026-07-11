@@ -61,7 +61,7 @@ export async function GET(
     };
   });
 
-  const topN = 50;
+  const topN = 100;
   const displayItems = items.slice(0, topN);
   const unlockedInTop = displayItems.filter((i) => i.isUnlocked).length;
 

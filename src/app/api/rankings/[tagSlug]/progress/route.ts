@@ -29,7 +29,7 @@ export async function GET(
   const topContentTags = await prisma.contentTag.findMany({
     where: { tagId: tag.id, status: "ACTIVE" },
     orderBy: { currentRank: "asc" },
-    take: 50,
+    take: 100,
     select: { contentId: true },
   });
 
@@ -44,6 +44,10 @@ export async function GET(
     top50: {
       unlocked: Math.min(unlocked, 50),
       total: Math.min(50, totalEligible),
+    },
+    top100: {
+      unlocked: Math.min(unlocked, 100),
+      total: Math.min(100, totalEligible),
     },
   });
 }

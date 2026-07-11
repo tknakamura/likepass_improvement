@@ -17,7 +17,7 @@ interface RankingData {
   progress: { unlocked: number; total: number };
 }
 
-const DISPLAY_LIMIT = 50;
+const DISPLAY_LIMIT = 100;
 
 export default function TagRankingPage({ params }: { params: Promise<{ tagSlug: string }> }) {
   const [data, setData] = useState<RankingData | null>(null);
@@ -39,7 +39,7 @@ export default function TagRankingPage({ params }: { params: Promise<{ tagSlug: 
 
   return (
     <div className="container mx-auto px-2 py-4 max-w-6xl">
-      <div className="mb-4 px-2">
+      <div className="mb-4 px-2 sticky top-0 z-20 bg-[var(--background)] py-2">
         <h1 className="text-xl font-bold">#{data.tag.slug}</h1>
         <p className="text-sm text-[var(--muted-foreground)]">
           開放 {data.progress.unlocked} / {data.progress.total}
@@ -50,13 +50,13 @@ export default function TagRankingPage({ params }: { params: Promise<{ tagSlug: 
         </p>
       </div>
 
-      <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
+      <div className="grid grid-cols-5 gap-1 sm:gap-1.5">
         {items.map((item) => (
           <div
             key={item.rank}
-            className="relative aspect-square rounded-md overflow-hidden border border-[var(--border)] bg-[var(--card)]"
+            className="relative aspect-square rounded overflow-hidden border border-[var(--border)]"
           >
-            <span className="absolute top-0.5 left-0.5 z-10 text-[10px] font-bold bg-black/60 text-white px-1 rounded">
+            <span className="absolute top-0.5 left-0.5 z-10 text-[10px] font-bold bg-black/50 text-white px-1 rounded">
               {item.rank}
             </span>
             {item.isUnlocked && item.content?.imageUrl ? (
@@ -69,18 +69,14 @@ export default function TagRankingPage({ params }: { params: Promise<{ tagSlug: 
                 sizes="20vw"
               />
             ) : (
-              <div className="absolute inset-0 bg-[var(--muted)] flex items-center justify-center p-1">
-                <span className="text-[9px] sm:text-[10px] text-center text-[var(--muted-foreground)] leading-tight">
-                  評価で開放
-                </span>
-              </div>
+              <div className="absolute inset-0 bg-zinc-300 dark:bg-zinc-700" />
             )}
           </div>
         ))}
       </div>
 
       {data.progress.unlocked < data.progress.total && (
-        <div className="mt-6 px-2 text-center">
+        <div className="mt-6 px-2 text-center pb-8">
           <Button asChild size="lg" className="w-full max-w-md">
             <Link href="/evaluate">ランダム評価を続ける</Link>
           </Button>
