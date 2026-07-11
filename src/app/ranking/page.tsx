@@ -7,18 +7,40 @@ export default async function RankingIndexPage() {
     where: { status: "ACTIVE" },
     orderBy: { usageCount: "desc" },
     take: 30,
+    include: {
+      _count: {
+        select: {
+          contentTags: {
+            where: {
+              status: { in: ["ACTIVE", "PENDING"] },
+              content: {
+                status: { in: ["EXPLORING", "ACTIVE"] },
+                deletedAt: null,
+              },
+            },
+          },
+        },
+      },
+    },
   });
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-2xl">
-      <h1 className="text-2xl font-bold mb-6">タグランキング</h1>
-      <div className="grid gap-3">
+    <div className="container mx-auto px-4 py-6 max-w-2xl">
+      <h1 className="text-xl font-bold mb-4 px-1">タグランキング</h1>
+      <div className="grid gap-2">
         {tags.map((tag) => (
           <Link key={tag.id} href={`/ranking/${tag.slug}`}>
             <Card className="hover:bg-[var(--muted)] transition-colors">
-              <CardHeader className="py-4">
-                <CardTitle className="text-lg">#{tag.slug}</CardTitle>
-                <p className="text-sm text-[var(--muted-foreground)]">{tag.displayName}</p>
+              <CardHeader className="py-3 px-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <CardTitle className="text-base">#{tag.slug}</CardTitle>
+                    <p className="text-sm text-[var(--muted-foreground)]">{tag.displayName}</p>
+                  </div>
+                  <p className="text-sm font-medium text-[var(--muted-foreground)] shrink-0 tabular-nums">
+                    {tag._count.contentTags} 投稿
+                  </p>
+                </div>
               </CardHeader>
             </Card>
           </Link>
