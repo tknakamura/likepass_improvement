@@ -12,6 +12,15 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const sessionId = searchParams.get("sessionId") ?? undefined;
+  const uniqueTagSlugs = [
+    ...new Set(
+      searchParams
+        .getAll("tags")
+        .flatMap((value) => value.split(","))
+        .map((slug) => slug.trim())
+        .filter(Boolean)
+    ),
+  ];
 
   const [votes, preferences, candidates] = await Promise.all([
     prisma.vote.findMany({ where: { userId: session.user.id }, select: { contentId: true } }),
@@ -42,13 +51,17 @@ export async function GET(request: Request) {
     preferences,
     votedContentIds: buildVotedSet(votes),
     sessionHistory: impressions.map((i) => i.contentId),
+    tagSlugs: uniqueTagSlugs.length > 0 ? uniqueTagSlugs : undefined,
   });
 
   if (!selected) {
     return NextResponse.json({ content: null });
   }
 
-  const contextTag = selected.contentTags[0]?.tag;
+  const slugFilter = uniqueTagSlugs.length > 0 ? new Set(uniqueTagSlugs) : null;
+  const contextTag = slugFilter
+    ? selected.contentTags.find((ct) => slugFilter.has(ct.tag.slug))?.tag
+    : selected.contentTags[0]?.tag;
 
   const imageKey = selected.mediumObjectKey ?? selected.largeObjectKey ?? selected.thumbnailObjectKey;
 
