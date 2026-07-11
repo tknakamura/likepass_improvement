@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: likepass
+      POSTGRES_PASSWORD: likepass
+      POSTGRES_DB: likepass
+    volumes:
+      - likepass_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U likepass"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  likepass_pg:

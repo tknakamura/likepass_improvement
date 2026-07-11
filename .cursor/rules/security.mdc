@@ -1,0 +1,13 @@
+---
+description: LIKEPASS security rules
+alwaysApply: true
+---
+
+# Security
+
+- Presigned URLs expire quickly; validate uploads server-side
+- Rate limit sensitive APIs in production
+- Admin routes require ADMIN role
+- Audit log for moderation actions
+- Strip EXIF on image processing
+- CSRF handled by Auth.js for auth routes

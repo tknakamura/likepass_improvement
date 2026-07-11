@@ -1,108 +1,87 @@
-# LIKEPASS 見積もり見直しプロジェクト
+# LIKEPASS
 
-株式会社LIKEPASSの様々な改善を行うプロジェクトの一環として、各社への見積書の内容の見直しを進めています。
+写真評価サービス「LIKEPASS」のMVPアプリケーションです。
 
-## プロジェクト概要
+> 素敵な画像を、みんなの審美眼で見つける。
 
-本プロジェクトでは、実際の発注データを基にした見積もり見直しを行い、より適正で透明性の高い価格設定を実現することを目指しています。
+## 技術スタック
 
-## 対象クライアント
+- **Frontend/Backend**: Next.js 15, TypeScript, Tailwind CSS
+- **Auth**: Auth.js (Google OAuth)
+- **Database**: PostgreSQL + Prisma
+- **Storage**: Cloudflare R2
+- **Jobs**: pg-boss (Background Worker)
+- **Hosting**: Render
 
-### 株式会社リクルート
-- **Hot Pepper Beauty関連業務**の見積もり見直し
-- 2025年8月度の発注データを基にした分析・提案
+## セットアップ（自分のPCで見る場合）
 
-## プロジェクト構成
+**重要:** Cloud Agent 上で起動したサーバーは、あなたのPCの `localhost` からは見えません。
+自分のPCで見るには、以下をローカルで実行してください。
 
+### いちばん簡単な方法（Docker あり）
+
+```bash
+git clone https://github.com/tknakamura/likepass_improvement.git
+cd likepass_improvement
+git checkout cursor/likepass-mvp-df00
+
+chmod +x scripts/dev-local.sh
+./scripts/dev-local.sh
 ```
-likepass_improvement/
-├── README.md                                    # プロジェクト概要
-├── order_list.csv                               # 2025年8月度発注データ
-├── order_list_utf8.csv                          # UTF-8変換済み発注データ
-├── 247｜T6020001094315.pdf                      # 実際の見積書247（インスタ施策）
-├── 248｜T6020001094315.pdf                      # 実際の見積書248（magazine記事）
-├── recruit_quotation_revision_proposal.md       # リクルート向け見積もり見直し提案書
-├── hotpepper_beauty_quotation_template.md       # Hot Pepper Beauty専用見積書テンプレート
-├── hotpepper_beauty_analysis.md                 # Hot Pepper Beauty業務分析レポート
-├── recruit_quotation_template.md                # リクルート向け見積書テンプレート
-├── recruit_quotation_analysis.md                # リクルート向け分析レポート
-└── quotation_comparison_analysis.md             # 実際の見積もりと提案の乖離分析レポート
+
+ブラウザで **http://localhost:3000** を開く。
+
+### 手動セットアップ
+
+```bash
+cp .env.example .env
+# DATABASE_URL と AUTH_SECRET を設定（Google OAuth は後からでも可）
+
+docker compose up -d postgres   # または手元の PostgreSQL
+npm install
+npx prisma migrate deploy
+npm run db:seed
+npm run dev
 ```
 
-## 主要な成果物
+別ターミナルでワーカー:
 
-### 1. 発注データ分析
-- **総発注額**: 1,876,000円（2025年8月度）
-- **Hot Pepper Beauty関連**: 1,280,000円（68%）
-- **その他業務**: 596,000円（32%）
+```bash
+npm run worker
+```
 
-### 2. 見積もり見直し提案
-- **基本方針**: 発注額の2倍ロジック
-- **Hot Pepper Beauty関連見積もり**: 2,816,000円（消費税込み）
-- **乖離率**: 0.5%（実際の見積もりとの比較）
+### うまく見えないとき
 
-### 3. 業務カテゴリ分類
-1. **プロジェクトディレクション費**: 400,000円（15%）
-2. **コンテンツ制作業務**: 100,000円（4%）
-3. **SEO・マーケティング支援**: 1,564,000円（61%）
-4. **SNS・Instagram施策**: 318,000円（12%）
-5. **ディレクション・管理業務**: 178,000円（7%）
+| 症状 | 対処 |
+|------|------|
+| 接続できない | `npm run dev` が動いているか確認（`0.0.0.0:3000` で待受） |
+| DB エラー | `docker compose up -d postgres` または PostgreSQL 起動 |
+| ログインできない | `.env` に Google OAuth の ID/Secret を設定 |
+| Cloud Agent の作業を見たい | Cursor の **Ports** タブで 3000 番の転送 URL を開く |
 
-## 重要な補足事項
+## 主要コマンド
 
-### ahrefsツール費用について
-- **ahrefsのツール費用は9月以降の開始**のため、8月分の分析には含まれていません
-- 9月以降の見積もりには、ahrefsツール費用を別途考慮する必要があります
+| コマンド | 説明 |
+|---------|------|
+| `npm run dev` | 開発サーバー |
+| `npm run build` | 本番ビルド |
+| `npm run test` | ユニットテスト |
+| `npm run test:e2e` | E2Eテスト |
+| `npm run worker` | バックグラウンドワーカー |
 
-## 分析結果の主要な発見
+## ドキュメント
 
-### 1. 見積もり精度の検証
-- 発注データを基にした2倍ロジックは実際の見積もりとほぼ一致（乖離率0.5%）
-- 提案の妥当性が実証された
+- [プロダクト仕様](docs/PRODUCT_SPEC.md)
+- [ビジネス文書（旧プロジェクト）](docs/business/)
 
-### 2. 業務の重要性
-- Hot Pepper Beauty関連業務は全体の約7割を占める最重要業務
-- リクルートとの関係において中核的な受注業務
+## デプロイ
 
-### 3. 価格設定の適正性
-- 実際の見積もり倍率: 1.99倍
-- 提案の見積もり倍率: 2.00倍
-- 発注データの2倍ロジックは適正
+Render Blueprint (`render.yaml`) を使用:
 
-## 今後の改善提案
+1. GitHub リポジトリを Render に接続
+2. Blueprint をデプロイ
+3. 環境変数（Google OAuth, R2 等）を Dashboard で設定
 
-### 短期改善（1-3ヶ月）
-1. 見積もり体系の導入
-2. 業務の標準化
+## ライセンス
 
-### 中期改善（3-6ヶ月）
-1. 効率化の推進
-2. 品質向上
-3. **ahrefsツール費用の見積もりへの反映**
-
-### 長期改善（6ヶ月以上）
-1. 戦略的パートナーシップ
-2. デジタル化の推進
-
-## 使用方法
-
-1. 各分析レポートを参照して現状を把握
-2. 見積書テンプレートを基に実際の見積もりを作成
-3. 定期的な発注データ分析による見積もり見直し
-
-## 注意事項
-
-- 本プロジェクトは2025年8月度のデータを基にした分析です
-- 9月以降はahrefsツール費用を考慮した見積もり調整が必要です
-- 定期的な見積もり見直しの仕組みを構築することを推奨します
-
-## 連絡先
-
-**株式会社ライクパス**  
-担当: 中村 武士  
-TEL: 070-1375-0071
-
----
-
-**プロジェクト開始日**: 2025年8月30日  
-**最終更新日**: 2025年8月30日
+Private

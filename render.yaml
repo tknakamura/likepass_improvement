@@ -1,0 +1,76 @@
+databases:
+  - name: likepass-db
+    plan: basic-256mb
+    region: oregon
+    databaseName: likepass
+    user: likepass
+
+services:
+  - type: web
+    name: likepass-web
+    runtime: node
+    region: oregon
+    plan: starter
+    buildCommand: npm ci && npx prisma migrate deploy && npm run build
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: likepass-db
+          property: connectionString
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: AUTH_TRUST_HOST
+        value: "true"
+      - key: AUTH_GOOGLE_ID
+        sync: false
+      - key: AUTH_GOOGLE_SECRET
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      - key: R2_PUBLIC_BASE_URL
+        sync: false
+      - key: IMAGE_AI_PROVIDER
+        value: mock
+      - key: IMAGE_AI_API_KEY
+        sync: false
+      - key: ADMIN_EMAIL_ALLOWLIST
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
+
+  - type: worker
+    name: likepass-worker
+    runtime: node
+    region: oregon
+    plan: starter
+    buildCommand: npm ci && npx prisma generate
+    startCommand: npm run worker
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: likepass-db
+          property: connectionString
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      - key: IMAGE_AI_PROVIDER
+        value: mock
+      - key: IMAGE_AI_API_KEY
+        sync: false

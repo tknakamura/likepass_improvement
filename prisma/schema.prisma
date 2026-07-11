@@ -1,0 +1,406 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+  PENDING_ONBOARDING
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum ContentStatus {
+  UPLOADING
+  PROCESSING
+  REVIEW_REQUIRED
+  EXPLORING
+  ACTIVE
+  DORMANT
+  REJECTED
+  DELETED
+}
+
+enum ContentTagStatus {
+  PENDING
+  ACTIVE
+  DORMANT
+  REMOVED
+}
+
+enum TagCategory {
+  SUBJECT
+  SCENE
+  STYLE
+  ATTRIBUTE
+  LOCATION
+}
+
+enum TagStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum VoteValue {
+  LIKE
+  PASS
+}
+
+enum ImpressionResult {
+  LIKE
+  PASS
+  SKIP
+  CLOSED
+  ERROR
+}
+
+enum ReportReason {
+  SEXUAL
+  VIOLENCE
+  HATE
+  HARASSMENT
+  PRIVACY
+  COPYRIGHT
+  SPAM
+  IMPERSONATION
+  MINOR_SAFETY
+  OTHER
+}
+
+enum ReportStatus {
+  PENDING
+  REVIEWED
+  DISMISSED
+  ACTION_TAKEN
+}
+
+enum ModerationTargetType {
+  CONTENT
+  USER
+  TAG
+  REPORT
+}
+
+enum ModerationActionType {
+  APPROVE
+  REJECT
+  SUSPEND
+  UNSUSPEND
+  TAG_UPDATE
+  RECALCULATE_RANKING
+}
+
+enum RankingPeriod {
+  ALL_TIME
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum AiSafetyStatus {
+  SAFE
+  REVIEW_REQUIRED
+  REJECTED
+}
+
+enum TagSource {
+  AI
+  USER
+  ADMIN
+}
+
+model User {
+  id                    String     @id @default(cuid())
+  name                  String?
+  username              String?    @unique
+  email                 String?    @unique
+  emailVerified         DateTime?
+  image                 String?
+  status                UserStatus @default(PENDING_ONBOARDING)
+  role                  UserRole   @default(USER)
+  termsAcceptedAt       DateTime?
+  privacyAcceptedAt     DateTime?
+  onboardingCompletedAt DateTime?
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+  deletedAt             DateTime?
+
+  accounts         Account[]
+  sessions         Session[]
+  contents         Content[]
+  votes            Vote[]
+  impressions      Impression[]
+  reports          Report[]           @relation("ReporterReports")
+  tagPreferences   UserTagPreference[]
+  moderationActions ModerationAction[] @relation("ActorModerationActions")
+  auditLogs        AuditLog[]
+
+  @@index([status])
+  @@index([email])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Content {
+  id                  String          @id @default(cuid())
+  userId              String
+  status              ContentStatus   @default(UPLOADING)
+  originalObjectKey   String?
+  largeObjectKey      String?
+  mediumObjectKey     String?
+  thumbnailObjectKey  String?
+  width               Int?
+  height              Int?
+  aspectRatio         Float?
+  mimeType            String?
+  fileSize            Int?
+  imageHash           String?
+  perceptualHash      String?
+  aiQualityScore      Float?
+  aiSafetyStatus      AiSafetyStatus  @default(SAFE)
+  likeCount           Int             @default(0)
+  passCount           Int             @default(0)
+  voteCount           Int             @default(0)
+  likeRate            Float           @default(0)
+  wilsonLower         Float           @default(0)
+  impressionCount     Int             @default(0)
+  reportCount         Int             @default(0)
+  publishedAt         DateTime?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  deletedAt           DateTime?
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contentTags  ContentTag[]
+  votes        Vote[]
+  impressions  Impression[]
+  reports      Report[]
+  rankingSnapshots RankingSnapshot[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([perceptualHash])
+  @@index([publishedAt])
+}
+
+model Tag {
+  id          String      @id @default(cuid())
+  slug        String      @unique
+  displayName String
+  category    TagCategory
+  status      TagStatus   @default(ACTIVE)
+  parentTagId String?
+  usageCount  Int         @default(0)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  parentTag       Tag?              @relation("TagHierarchy", fields: [parentTagId], references: [id])
+  childTags       Tag[]             @relation("TagHierarchy")
+  contentTags     ContentTag[]
+  impressions     Impression[]
+  preferences     UserTagPreference[]
+  rankingSnapshots RankingSnapshot[]
+
+  @@index([category])
+  @@index([usageCount])
+}
+
+model ContentTag {
+  id            String           @id @default(cuid())
+  contentId     String
+  tagId         String
+  source        TagSource        @default(AI)
+  confidence    Float?
+  status        ContentTagStatus @default(PENDING)
+  likeCount     Int              @default(0)
+  passCount     Int              @default(0)
+  voteCount     Int              @default(0)
+  rankingScore  Float            @default(0)
+  currentRank   Int?
+  previousRank  Int?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  content Content @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([contentId, tagId])
+  @@index([tagId, status, rankingScore])
+  @@index([contentId])
+}
+
+model Vote {
+  id                String    @id @default(cuid())
+  userId            String
+  contentId         String
+  value             VoteValue
+  sourceTagId       String?
+  sessionId         String?
+  positionInSession Int?
+  responseTimeMs    Int?
+  changedCount      Int       @default(0)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content Content @relation(fields: [contentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, contentId])
+  @@index([contentId])
+  @@index([userId])
+}
+
+model Impression {
+  id              String            @id @default(cuid())
+  userId          String
+  contentId       String
+  tagId           String?
+  sessionId       String?
+  source          String?
+  shownAt         DateTime          @default(now())
+  viewDurationMs  Int?
+  result          ImpressionResult?
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content Content @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  tag     Tag?    @relation(fields: [tagId], references: [id], onDelete: SetNull)
+
+  @@index([userId, shownAt])
+  @@index([contentId])
+}
+
+model RankingSnapshot {
+  id           String         @id @default(cuid())
+  tagId        String
+  period       RankingPeriod  @default(ALL_TIME)
+  contentId    String
+  rank         Int
+  score        Float
+  voteCount    Int
+  likeRate     Float
+  calculatedAt DateTime       @default(now())
+
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  content Content @relation(fields: [contentId], references: [id], onDelete: Cascade)
+
+  @@index([tagId, period, rank])
+  @@index([calculatedAt])
+}
+
+model Report {
+  id             String       @id @default(cuid())
+  reporterUserId String
+  contentId      String
+  reason         ReportReason
+  description    String?      @db.Text
+  status         ReportStatus @default(PENDING)
+  reviewedBy     String?
+  reviewedAt     DateTime?
+  createdAt      DateTime     @default(now())
+
+  reporter User    @relation("ReporterReports", fields: [reporterUserId], references: [id], onDelete: Cascade)
+  content  Content @relation(fields: [contentId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([contentId])
+}
+
+model UserTagPreference {
+  id        String   @id @default(cuid())
+  userId    String
+  tagId     String
+  weight    Float    @default(1.0)
+  source    String   @default("onboarding")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tagId])
+}
+
+model ModerationAction {
+  id          String               @id @default(cuid())
+  targetType  ModerationTargetType
+  targetId    String
+  action      ModerationActionType
+  reason      String?
+  actorUserId String?
+  metadata    Json?
+  createdAt   DateTime             @default(now())
+
+  actor User? @relation("ActorModerationActions", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([targetType, targetId])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorUserId String?
+  action      String
+  entityType  String
+  entityId    String
+  before      Json?
+  after       Json?
+  ipHash      String?
+  createdAt   DateTime @default(now())
+
+  actor User? @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+model AppConfig {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
+}
