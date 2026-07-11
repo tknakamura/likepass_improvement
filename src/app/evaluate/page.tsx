@@ -26,6 +26,7 @@ interface VoteFeedback {
 export default function EvaluatePage() {
   const [content, setContent] = useState<EvalContent | null>(null);
   const [feedback, setFeedback] = useState<VoteFeedback | null>(null);
+  const [evaluatedCount, setEvaluatedCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [sessionId] = useState(() => crypto.randomUUID());
   const [shownAt, setShownAt] = useState<number>(Date.now());
@@ -44,6 +45,17 @@ export default function EvaluatePage() {
   useEffect(() => {
     loadNext();
   }, [loadNext]);
+
+  const refreshEvaluatedCount = useCallback(() => {
+    fetch("/api/me/stats")
+      .then((r) => r.json())
+      .then((d) => setEvaluatedCount(d.evaluatedCount ?? 0))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    refreshEvaluatedCount();
+  }, [refreshEvaluatedCount]);
 
   async function vote(value: "LIKE" | "PASS") {
     if (!content) return;
@@ -66,6 +78,7 @@ export default function EvaluatePage() {
         voteCount: (data.result.likeCount ?? 0) + (data.result.passCount ?? 0),
         unlockedRankings: data.unlockedRankings ?? [],
       });
+      refreshEvaluatedCount();
       const delay = data.unlockedRankings?.length > 0 ? 1800 : 1000;
       setTimeout(() => loadNext(), delay);
     } else {
@@ -75,11 +88,18 @@ export default function EvaluatePage() {
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-lg">
-      {content?.contextTag && (
-        <p className="text-center text-sm text-[var(--muted-foreground)] mb-4">
-          #{content.contextTag.slug} の写真を評価中
-        </p>
-      )}
+      <div className="flex items-center justify-between mb-4 text-sm">
+        {content?.contextTag ? (
+          <p className="text-[var(--muted-foreground)]">#{content.contextTag.slug} の写真を評価中</p>
+        ) : (
+          <span />
+        )}
+        {evaluatedCount !== null && (
+          <p className="text-[var(--muted-foreground)] tabular-nums">
+            評価済み <span className="font-medium text-[var(--foreground)]">{evaluatedCount}</span> 件
+          </p>
+        )}
+      </div>
 
       <Card className="overflow-hidden">
         <CardContent className="p-0">
