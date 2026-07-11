@@ -1,8 +1,11 @@
-import NextAuth from "next-auth";
+import NextAuth, { type NextAuthConfig } from "next-auth";
 import Google from "next-auth/providers/google";
+import Credentials from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/db";
 import type { UserRole, UserStatus } from "@prisma/client";
+
+const demoMode = process.env.DEMO_MODE === "true";
 
 declare module "next-auth" {
   interface Session {
@@ -28,14 +31,32 @@ declare module "next-auth" {
   }
 }
 
+const providers: NextAuthConfig["providers"] = [
+  Google({
+    clientId: process.env.AUTH_GOOGLE_ID!,
+    clientSecret: process.env.AUTH_GOOGLE_SECRET!,
+  }),
+];
+
+if (demoMode) {
+  providers.push(
+    Credentials({
+      id: "demo",
+      name: "Demo",
+      credentials: {},
+      authorize: async () => {
+        const user = await prisma.user.findUnique({
+          where: { email: "demo@likepass.local" },
+        });
+        return user;
+      },
+    })
+  );
+}
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(prisma),
-  providers: [
-    Google({
-      clientId: process.env.AUTH_GOOGLE_ID!,
-      clientSecret: process.env.AUTH_GOOGLE_SECRET!,
-    }),
-  ],
+  providers,
   session: { strategy: "database" },
   pages: {
     signIn: "/signin",
@@ -53,7 +74,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return session;
     },
     async signIn({ user, account }) {
-      if (!account || account.provider !== "google") return true;
+      if (!account || account.provider === "demo" || account.provider === "credentials") {
+        return true;
+      }
+      if (account.provider !== "google") return true;
 
       const adminEmails = (process.env.ADMIN_EMAIL_ALLOWLIST ?? "")
         .split(",")

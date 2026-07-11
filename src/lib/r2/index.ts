@@ -18,6 +18,9 @@ function getR2Client() {
 }
 
 export function getPublicImageUrl(objectKey: string): string {
+  if (objectKey.startsWith("http://") || objectKey.startsWith("https://")) {
+    return objectKey;
+  }
   const base = process.env.R2_PUBLIC_BASE_URL;
   if (!base) return `/api/images/${encodeURIComponent(objectKey)}`;
   return `${base.replace(/\/$/, "")}/${objectKey}`;

@@ -1,5 +1,8 @@
 import Link from "next/link";
+import { signIn } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
+
+const demoMode = process.env.DEMO_MODE === "true";
 
 export default function HomePage() {
   return (
@@ -13,10 +16,23 @@ export default function HomePage() {
           写真に LIKE または PASS の二択で評価。AIが付けたタグごとにランキングが形成され、
           評価に参加することで順位の写真が開放されます。
         </p>
-        <div className="flex gap-4 justify-center pt-4">
-          <Button asChild size="lg">
-            <Link href="/signin">Googleで続ける</Link>
-          </Button>
+        <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
+          {demoMode ? (
+            <form
+              action={async () => {
+                "use server";
+                await signIn("demo", { redirectTo: "/evaluate" });
+              }}
+            >
+              <Button type="submit" size="lg" className="w-full sm:w-auto">
+                デモで評価を試す
+              </Button>
+            </form>
+          ) : (
+            <Button asChild size="lg">
+              <Link href="/signin">Googleで続ける</Link>
+            </Button>
+          )}
           <Button asChild variant="outline" size="lg">
             <Link href="/ranking">ランキングを見る</Link>
           </Button>
