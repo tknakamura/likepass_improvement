@@ -1,8 +1,7 @@
-import NextAuth, { type NextAuthConfig } from "next-auth";
-import Google from "next-auth/providers/google";
-import Credentials from "next-auth/providers/credentials";
+import NextAuth from "next-auth";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/db";
+import { authConfig } from "@/lib/auth/auth.config";
 import type { UserRole, UserStatus } from "@prisma/client";
 
 const demoMode = process.env.DEMO_MODE === "true";
@@ -31,39 +30,59 @@ declare module "next-auth" {
   }
 }
 
-const providers: NextAuthConfig["providers"] = [
-  Google({
-    clientId: process.env.AUTH_GOOGLE_ID!,
-    clientSecret: process.env.AUTH_GOOGLE_SECRET!,
-  }),
-];
+declare module "@auth/core/jwt" {
+  interface JWT {
+    username?: string | null;
+    status?: UserStatus;
+    role?: UserRole;
+    onboardingCompletedAt?: string | null;
+    termsAcceptedAt?: string | null;
+  }
+}
 
-if (demoMode) {
-  providers.push(
-    Credentials({
-      id: "demo",
-      name: "Demo",
-      credentials: {},
-      authorize: async () => {
-        const user = await prisma.user.findUnique({
-          where: { email: "demo@likepass.local" },
-        });
-        return user;
-      },
-    })
-  );
+async function loadDemoUser() {
+  return prisma.user.findUnique({ where: { email: "demo@likepass.local" } });
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  adapter: PrismaAdapter(prisma),
-  providers,
-  session: { strategy: "database" },
-  pages: {
-    signIn: "/signin",
-  },
+  ...authConfig,
+  adapter: demoMode ? undefined : PrismaAdapter(prisma),
   callbacks: {
-    async session({ session, user }) {
-      if (session.user) {
+    ...authConfig.callbacks,
+    async jwt({ token, user, account }) {
+      if (account?.provider === "demo") {
+        const demoUser = await loadDemoUser();
+        if (demoUser) {
+          token.sub = demoUser.id;
+          token.username = demoUser.username;
+          token.status = demoUser.status;
+          token.role = demoUser.role;
+          token.onboardingCompletedAt = demoUser.onboardingCompletedAt?.toISOString() ?? null;
+          token.termsAcceptedAt = demoUser.termsAcceptedAt?.toISOString() ?? null;
+        }
+      } else if (user) {
+        token.sub = user.id;
+        token.username = user.username;
+        token.status = user.status;
+        token.role = user.role;
+        token.onboardingCompletedAt = user.onboardingCompletedAt?.toISOString() ?? null;
+        token.termsAcceptedAt = user.termsAcceptedAt?.toISOString() ?? null;
+      }
+      return token;
+    },
+    async session({ session, token, user }) {
+      if (demoMode && token?.sub) {
+        session.user.id = token.sub;
+        session.user.username = token.username as string | null;
+        session.user.status = (token.status as UserStatus) ?? "ACTIVE";
+        session.user.role = (token.role as UserRole) ?? "USER";
+        session.user.onboardingCompletedAt = token.onboardingCompletedAt
+          ? new Date(token.onboardingCompletedAt as string)
+          : null;
+        session.user.termsAcceptedAt = token.termsAcceptedAt
+          ? new Date(token.termsAcceptedAt as string)
+          : null;
+      } else if (user && session.user) {
         session.user.id = user.id;
         session.user.username = user.username;
         session.user.status = user.status;
@@ -74,10 +93,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return session;
     },
     async signIn({ user, account }) {
-      if (!account || account.provider === "demo" || account.provider === "credentials") {
-        return true;
+      if (account?.provider === "demo") {
+        const demoUser = await loadDemoUser();
+        return !!demoUser;
       }
-      if (account.provider !== "google") return true;
+      if (!account || account.provider !== "google") return true;
 
       const adminEmails = (process.env.ADMIN_EMAIL_ALLOWLIST ?? "")
         .split(",")
@@ -94,6 +114,4 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return true;
     },
   },
-  trustHost: process.env.AUTH_TRUST_HOST === "true",
-  secret: process.env.AUTH_SECRET,
 });

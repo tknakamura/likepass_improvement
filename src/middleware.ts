@@ -1,36 +1,33 @@
-import { auth } from "@/lib/auth";
+import NextAuth from "next-auth";
 import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
+import { authConfig } from "@/lib/auth/auth.config";
 
-const protectedPaths = [
-  "/evaluate",
-  "/upload",
-  "/onboarding",
-  "/me",
-  "/notifications",
-  "/admin",
-];
+const { auth } = NextAuth(authConfig);
 
 const authFlowPaths = ["/onboarding", "/signin/setup"];
 
-export async function middleware(request: NextRequest) {
+export default auth((request) => {
   const { pathname } = request.nextUrl;
-  const session = await auth();
-
-  const isProtected = protectedPaths.some(
-    (p) => pathname === p || pathname.startsWith(`${p}/`)
-  );
-
-  if (isProtected && !session?.user) {
-    const signInUrl = new URL("/signin", request.url);
-    signInUrl.searchParams.set("callbackUrl", pathname);
-    return NextResponse.redirect(signInUrl);
-  }
+  const session = request.auth;
 
   if (session?.user) {
-    const needsSetup =
-      !session.user.termsAcceptedAt || !session.user.username;
-    const needsOnboarding = !session.user.onboardingCompletedAt;
+    // Demo mode: seeded user is fully onboarded; auth.config lacks JWT field callbacks
+    if (process.env.DEMO_MODE === "true") {
+      if (session.user.role !== "ADMIN" && pathname.startsWith("/admin")) {
+        return NextResponse.redirect(new URL("/", request.url));
+      }
+      return NextResponse.next();
+    }
+
+    const user = session.user as {
+      termsAcceptedAt?: Date | string | null;
+      username?: string | null;
+      onboardingCompletedAt?: Date | string | null;
+      role?: string;
+    };
+
+    const needsSetup = !user.termsAcceptedAt || !user.username;
+    const needsOnboarding = !user.onboardingCompletedAt;
 
     if (
       needsSetup &&
@@ -49,16 +46,13 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(new URL("/onboarding", request.url));
     }
 
-    if (
-      session.user.role !== "ADMIN" &&
-      pathname.startsWith("/admin")
-    ) {
+    if (user.role !== "ADMIN" && pathname.startsWith("/admin")) {
       return NextResponse.redirect(new URL("/", request.url));
     }
   }
 
   return NextResponse.next();
-}
+});
 
 export const config = {
   matcher: [
