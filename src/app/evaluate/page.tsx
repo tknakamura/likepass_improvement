@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import { Flag, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 
@@ -29,7 +30,14 @@ interface VoteFeedback {
   unlockedRankings: UnlockedRanking[];
 }
 
+interface LastVote {
+  contentId: string;
+  value: "LIKE" | "PASS";
+  undoUntil: number;
+}
+
 const TAG_FILTER_STORAGE_KEY = "likepass-eval-tag-slugs";
+const SWIPE_THRESHOLD = 72;
 
 export default function EvaluatePage() {
   const [tags, setTags] = useState<Tag[]>([]);
@@ -37,10 +45,15 @@ export default function EvaluatePage() {
   const [tagsReady, setTagsReady] = useState(false);
   const [content, setContent] = useState<EvalContent | null>(null);
   const [feedback, setFeedback] = useState<VoteFeedback | null>(null);
+  const [lastVote, setLastVote] = useState<LastVote | null>(null);
+  const [undoSecondsLeft, setUndoSecondsLeft] = useState(0);
   const [evaluatedCount, setEvaluatedCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
+  const [swipeX, setSwipeX] = useState(0);
   const [sessionId] = useState(() => crypto.randomUUID());
   const [shownAt, setShownAt] = useState<number>(Date.now());
+  const touchStartX = useRef(0);
+  const votingRef = useRef(false);
 
   useEffect(() => {
     const stored = localStorage.getItem(TAG_FILTER_STORAGE_KEY);
@@ -56,10 +69,7 @@ export default function EvaluatePage() {
           .map((p: { slug: string }) => p.slug)
           .filter((slug: string) => validSlugs.has(slug));
 
-        const initial =
-          storedSlugs?.filter((slug) => validSlugs.has(slug)) ??
-          preferredSlugs;
-
+        const initial = storedSlugs?.filter((slug) => validSlugs.has(slug)) ?? preferredSlugs;
         setSelectedTagSlugs(new Set(initial));
         setTagsReady(true);
       })
@@ -74,6 +84,8 @@ export default function EvaluatePage() {
   const loadNext = useCallback(async () => {
     setLoading(true);
     setFeedback(null);
+    setLastVote(null);
+    setSwipeX(0);
     const params = new URLSearchParams({ sessionId });
     for (const slug of selectedTagSlugs) {
       params.append("tags", slug);
@@ -101,6 +113,23 @@ export default function EvaluatePage() {
     refreshEvaluatedCount();
   }, [refreshEvaluatedCount]);
 
+  useEffect(() => {
+    if (!lastVote) {
+      setUndoSecondsLeft(0);
+      return;
+    }
+
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((lastVote.undoUntil - Date.now()) / 1000));
+      setUndoSecondsLeft(left);
+      if (left === 0) setLastVote(null);
+    };
+
+    tick();
+    const id = window.setInterval(tick, 200);
+    return () => window.clearInterval(id);
+  }, [lastVote]);
+
   function toggleTag(slug: string) {
     setSelectedTagSlugs((prev) => {
       const next = new Set(prev);
@@ -114,33 +143,94 @@ export default function EvaluatePage() {
     setSelectedTagSlugs(new Set());
   }
 
-  async function vote(value: "LIKE" | "PASS") {
-    if (!content) return;
+  const vote = useCallback(
+    async (value: "LIKE" | "PASS") => {
+      if (!content || votingRef.current) return;
+      votingRef.current = true;
+      setLoading(true);
+      const votedContentId = content.id;
+
+      const res = await fetch("/api/votes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contentId: content.id,
+          value,
+          sourceTagId: content.contextTag?.id,
+          sessionId,
+          responseTimeMs: Date.now() - shownAt,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setFeedback({
+          likeRate: data.result.likeRate,
+          voteCount: (data.result.likeCount ?? 0) + (data.result.passCount ?? 0),
+          unlockedRankings: data.unlockedRankings ?? [],
+        });
+        setLastVote({
+          contentId: votedContentId,
+          value,
+          undoUntil: data.vote?.undoUntil ?? Date.now() + 5000,
+        });
+        refreshEvaluatedCount();
+        const delay = data.unlockedRankings?.length > 0 ? 1800 : 1000;
+        setTimeout(() => {
+          votingRef.current = false;
+          loadNext();
+        }, delay);
+      } else {
+        votingRef.current = false;
+        setLoading(false);
+      }
+    },
+    [content, sessionId, shownAt, refreshEvaluatedCount, loadNext]
+  );
+
+  async function undoVote() {
+    if (!lastVote) return;
     setLoading(true);
     const res = await fetch("/api/votes", {
-      method: "POST",
+      method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contentId: content.id,
-        value,
-        sourceTagId: content.contextTag?.id,
-        sessionId,
-        responseTimeMs: Date.now() - shownAt,
-      }),
+      body: JSON.stringify({ contentId: lastVote.contentId }),
     });
-    const data = await res.json();
     if (res.ok) {
-      setFeedback({
-        likeRate: data.result.likeRate,
-        voteCount: (data.result.likeCount ?? 0) + (data.result.passCount ?? 0),
-        unlockedRankings: data.unlockedRankings ?? [],
-      });
+      setLastVote(null);
+      setFeedback(null);
       refreshEvaluatedCount();
-      const delay = data.unlockedRankings?.length > 0 ? 1800 : 1000;
-      setTimeout(() => loadNext(), delay);
+      await loadNext();
     } else {
       setLoading(false);
     }
+  }
+
+  async function reportContent() {
+    if (!content) return;
+    const confirmed = window.confirm("この写真を通報しますか？");
+    if (!confirmed) return;
+
+    await fetch("/api/reports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contentId: content.id, reason: "OTHER", description: "evaluate_page" }),
+    });
+    alert("通報を受け付けました。ありがとうございます。");
+  }
+
+  function onTouchStart(e: React.TouchEvent) {
+    touchStartX.current = e.touches[0].clientX;
+  }
+
+  function onTouchMove(e: React.TouchEvent) {
+    if (!content?.imageUrl || loading) return;
+    setSwipeX(e.touches[0].clientX - touchStartX.current);
+  }
+
+  function onTouchEnd() {
+    if (swipeX >= SWIPE_THRESHOLD) vote("LIKE");
+    else if (swipeX <= -SWIPE_THRESHOLD) vote("PASS");
+    setSwipeX(0);
   }
 
   const filterLabel =
@@ -148,19 +238,57 @@ export default function EvaluatePage() {
       ? "すべてのタグ"
       : [...selectedTagSlugs].map((slug) => `#${slug}`).join(" · ");
 
+  const swipeHint =
+    swipeX > 20 ? "LIKE" : swipeX < -20 ? "PASS" : null;
+
   return (
     <div className="container mx-auto px-4 py-8 max-w-lg">
-      {evaluatedCount !== null && (
-        <p className="mb-4 text-sm text-right text-[var(--muted-foreground)] tabular-nums">
-          評価済み <span className="font-medium text-[var(--foreground)]">{evaluatedCount}</span> 件
-        </p>
-      )}
+      <div className="mb-4 flex items-center justify-between text-sm">
+        {evaluatedCount !== null ? (
+          <p className="text-[var(--muted-foreground)] tabular-nums">
+            評価済み <span className="font-medium text-[var(--foreground)]">{evaluatedCount}</span> 件
+          </p>
+        ) : (
+          <span />
+        )}
+        {content && (
+          <button
+            type="button"
+            onClick={reportContent}
+            className="inline-flex items-center gap-1 text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+            aria-label="通報"
+          >
+            <Flag className="h-4 w-4" />
+            通報
+          </button>
+        )}
+      </div>
 
       <Card className="overflow-hidden">
         <CardContent className="p-0">
-          <div className="relative aspect-square bg-[var(--muted)] flex items-center justify-center">
+          <div
+            className="relative aspect-square bg-[var(--muted)] flex items-center justify-center touch-pan-y"
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onTouchEnd={onTouchEnd}
+            style={{
+              transform: swipeX ? `translateX(${Math.max(-120, Math.min(120, swipeX))}px)` : undefined,
+              transition: swipeX === 0 ? "transform 0.2s ease" : undefined,
+            }}
+          >
+            {swipeHint && (
+              <span
+                className={`absolute top-3 z-20 rounded px-2 py-1 text-xs font-bold ${
+                  swipeHint === "LIKE"
+                    ? "right-3 bg-[var(--primary)] text-[var(--primary-foreground)]"
+                    : "left-3 bg-zinc-700 text-white"
+                }`}
+              >
+                {swipeHint}
+              </span>
+            )}
             {content?.imageUrl ? (
-              <Image src={content.imageUrl} alt="評価対象" fill className="object-contain" unoptimized />
+              <Image src={content.imageUrl} alt="評価対象" fill className="object-contain pointer-events-none" unoptimized />
             ) : (
               <p className="text-[var(--muted-foreground)] px-4 text-center">
                 {loading
@@ -174,8 +302,12 @@ export default function EvaluatePage() {
         </CardContent>
       </Card>
 
+      <p className="mt-2 text-xs text-center text-[var(--muted-foreground)]">
+        左右にスワイプ、またはボタンで評価できます
+      </p>
+
       {content?.contextTag && (
-        <p className="mt-2 text-sm text-center text-[var(--muted-foreground)]">
+        <p className="mt-1 text-sm text-center text-[var(--muted-foreground)]">
           #{content.contextTag.slug} の写真を評価中
         </p>
       )}
@@ -194,6 +326,15 @@ export default function EvaluatePage() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {lastVote && undoSecondsLeft > 0 && (
+        <div className="mt-3 flex justify-center">
+          <Button variant="outline" size="sm" onClick={undoVote} disabled={loading}>
+            <RotateCcw className="h-4 w-4" />
+            取り消し（{undoSecondsLeft}秒）
+          </Button>
         </div>
       )}
 

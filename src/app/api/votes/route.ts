@@ -147,3 +147,45 @@ export async function PATCH(request: Request) {
 
   return NextResponse.json({ vote });
 }
+
+const undoSchema = z.object({
+  contentId: z.string(),
+});
+
+export async function DELETE(request: Request) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const body = await request.json();
+  const parsed = undoSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Invalid undo request" }, { status: 400 });
+  }
+
+  const existing = await prisma.vote.findUnique({
+    where: {
+      userId_contentId: {
+        userId: session.user.id,
+        contentId: parsed.data.contentId,
+      },
+    },
+  });
+
+  if (!existing) {
+    return NextResponse.json({ error: "Vote not found" }, { status: 404 });
+  }
+
+  const withinUndo =
+    Date.now() - existing.createdAt.getTime() <= UNDO_WINDOW_MS && existing.changedCount === 0;
+
+  if (!withinUndo) {
+    return NextResponse.json({ error: "Undo window expired" }, { status: 403 });
+  }
+
+  await updateVoteAggregates(parsed.data.contentId, existing.value, undefined);
+  await prisma.vote.delete({ where: { id: existing.id } });
+
+  return NextResponse.json({ success: true });
+}

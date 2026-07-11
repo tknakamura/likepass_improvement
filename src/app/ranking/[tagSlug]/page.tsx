@@ -11,24 +11,47 @@ interface RankingItem {
   content: { id: string; imageUrl: string } | null;
 }
 
+interface ProgressBuckets {
+  top10: { unlocked: number; total: number };
+  top50: { unlocked: number; total: number };
+  top100: { unlocked: number; total: number };
+}
+
 interface RankingData {
   tag: { slug: string; displayName: string };
+  period: string;
   items: RankingItem[];
   progress: { unlocked: number; total: number };
 }
 
+const PERIODS = [
+  { key: "ALL_TIME", label: "全期間" },
+  { key: "WEEKLY", label: "週間" },
+  { key: "DAILY", label: "今日" },
+] as const;
+
 const DISPLAY_LIMIT = 100;
 
 export default function TagRankingPage({ params }: { params: Promise<{ tagSlug: string }> }) {
+  const [tagSlug, setTagSlug] = useState<string | null>(null);
+  const [period, setPeriod] = useState<(typeof PERIODS)[number]["key"]>("ALL_TIME");
   const [data, setData] = useState<RankingData | null>(null);
+  const [buckets, setBuckets] = useState<ProgressBuckets | null>(null);
 
   useEffect(() => {
-    params.then((p) => {
-      fetch(`/api/rankings/${p.tagSlug}`)
-        .then((r) => r.json())
-        .then(setData);
-    });
+    params.then((p) => setTagSlug(p.tagSlug));
   }, [params]);
+
+  useEffect(() => {
+    if (!tagSlug) return;
+    fetch(`/api/rankings/${tagSlug}?period=${period}`)
+      .then((r) => r.json())
+      .then(setData);
+    fetch(`/api/rankings/${tagSlug}/progress`)
+      .then((r) => r.json())
+      .then(setBuckets)
+      .catch(() => setBuckets(null));
+  }, [tagSlug, period]);
 
   if (!data) {
     return <div className="container mx-auto px-4 py-8 text-center text-sm max-w-2xl">読み込み中...</div>;
@@ -36,16 +59,47 @@ export default function TagRankingPage({ params }: { params: Promise<{ tagSlug: 
 
   const items = data.items.slice(0, DISPLAY_LIMIT);
   const remaining = data.progress.total - data.progress.unlocked;
+  const top10Remaining = buckets ? Math.max(0, buckets.top10.total - buckets.top10.unlocked) : null;
 
   return (
     <div className="container mx-auto px-4 py-4 max-w-2xl">
-      <div className="mb-4 sticky top-0 z-20 bg-[var(--background)] py-2">
-        <h1 className="text-xl font-bold">#{data.tag.slug}</h1>
+      <div className="mb-4 sticky top-0 z-20 bg-[var(--background)] py-2 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <h1 className="text-xl font-bold">#{data.tag.slug}</h1>
+          <div className="flex gap-1">
+            {PERIODS.map((p) => (
+              <button
+                key={p.key}
+                type="button"
+                onClick={() => setPeriod(p.key)}
+                className={`px-2 py-1 rounded text-xs border ${
+                  period === p.key
+                    ? "bg-[var(--primary)] text-[var(--primary-foreground)] border-transparent"
+                    : "border-[var(--border)]"
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <p className="text-sm text-[var(--muted-foreground)]">
           開放 {data.progress.unlocked} / {data.progress.total}
           {remaining > 0 && ` · あと${remaining}枚`}
         </p>
-        <p className="text-xs text-[var(--muted-foreground)] mt-1">
+        {buckets && (
+          <div className="text-xs text-[var(--muted-foreground)] space-y-0.5">
+            <p>
+              TOP 10: {buckets.top10.unlocked}/{buckets.top10.total}
+              {top10Remaining !== null && top10Remaining > 0 && ` · あと${top10Remaining}枚でTOP 10をすべて開放`}
+            </p>
+            <p>
+              TOP 50: {buckets.top50.unlocked}/{buckets.top50.total} · TOP 100: {buckets.top100.unlocked}/
+              {buckets.top100.total}
+            </p>
+          </div>
+        )}
+        <p className="text-xs text-[var(--muted-foreground)]">
           ランキングを埋めるには、評価画面でランダムに表示される写真を LIKE / PASS し続けてください。
         </p>
       </div>
@@ -69,7 +123,9 @@ export default function TagRankingPage({ params }: { params: Promise<{ tagSlug: 
                 sizes="33vw"
               />
             ) : (
-              <div className="absolute inset-0 bg-zinc-300 dark:bg-zinc-700" />
+              <div className="absolute inset-0 bg-zinc-300 dark:bg-zinc-700 flex items-center justify-center">
+                <span className="text-[9px] text-zinc-600 dark:text-zinc-300 px-1 text-center">評価で開放</span>
+              </div>
             )}
           </div>
         ))}

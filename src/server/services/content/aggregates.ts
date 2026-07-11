@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { getAppConfigs } from "@/lib/app-config";
 import {
   computeLikeRate,
   computeRankingScore,
@@ -9,6 +10,7 @@ import {
 import type { ContentStatus, ContentTagStatus } from "@prisma/client";
 
 export async function updateVoteAggregates(contentId: string, oldValue?: "LIKE" | "PASS", newValue?: "LIKE" | "PASS") {
+  const configs = await getAppConfigs();
   const content = await prisma.content.findUnique({ where: { id: contentId } });
   if (!content) return;
 
@@ -27,11 +29,11 @@ export async function updateVoteAggregates(contentId: string, oldValue?: "LIKE" 
   const wilsonLower = wilsonLowerBound(likeCount, passCount);
 
   let status: ContentStatus = content.status;
-  if (shouldBecomeDormant(likeCount, passCount) && ["EXPLORING", "ACTIVE"].includes(content.status)) {
+  if (shouldBecomeDormant(likeCount, passCount, configs.dormant) && ["EXPLORING", "ACTIVE"].includes(content.status)) {
     status = "DORMANT";
   } else if (
     content.status === "EXPLORING" &&
-    meetsRankingEligibility(likeCount, passCount)
+    meetsRankingEligibility(likeCount, passCount, configs.ranking.minVotes, configs.ranking.minLikes)
   ) {
     status = "ACTIVE";
   }
@@ -46,6 +48,7 @@ export async function updateVoteAggregates(contentId: string, oldValue?: "LIKE" 
 }
 
 async function updateContentTagAggregates(contentId: string) {
+  const configs = await getAppConfigs();
   const content = await prisma.content.findUnique({ where: { id: contentId } });
   if (!content) return;
 
@@ -55,12 +58,21 @@ async function updateContentTagAggregates(contentId: string) {
       likeCount: content.likeCount,
       passCount: content.passCount,
       publishedAt: content.publishedAt,
+      targetVotes: configs.ranking.targetVotes,
     });
 
     let tagStatus: ContentTagStatus = ct.status;
-    if (shouldBecomeDormant(content.likeCount, content.passCount)) {
+    if (shouldBecomeDormant(content.likeCount, content.passCount, configs.dormant)) {
       tagStatus = "DORMANT";
-    } else if (meetsRankingEligibility(content.likeCount, content.passCount) && content.status === "ACTIVE") {
+    } else if (
+      meetsRankingEligibility(
+        content.likeCount,
+        content.passCount,
+        configs.ranking.minVotes,
+        configs.ranking.minLikes
+      ) &&
+      content.status === "ACTIVE"
+    ) {
       tagStatus = "ACTIVE";
     }
 
@@ -93,19 +105,40 @@ export async function evaluateLifecycle(contentId: string) {
 }
 
 export async function recalculateTagRanking(tagId: string, period: "ALL_TIME" | "DAILY" | "WEEKLY" | "MONTHLY" = "ALL_TIME") {
+  const configs = await getAppConfigs();
+  const periodStart = getPeriodStart(period);
+
   const contentTags = await prisma.contentTag.findMany({
     where: {
       tagId,
       status: "ACTIVE",
-      content: { status: "ACTIVE" },
+      content: {
+        status: "ACTIVE",
+        ...(periodStart ? { publishedAt: { gte: periodStart } } : {}),
+      },
     },
     include: { content: true },
-    orderBy: { rankingScore: "desc" },
   });
 
-  const eligible = contentTags.filter((ct) =>
-    meetsRankingEligibility(ct.content.likeCount, ct.content.passCount)
-  );
+  const eligible = contentTags
+    .filter((ct) =>
+      meetsRankingEligibility(
+        ct.content.likeCount,
+        ct.content.passCount,
+        configs.ranking.minVotes,
+        configs.ranking.minLikes
+      )
+    )
+    .map((ct) => ({
+      ...ct,
+      rankingScore: computeRankingScore({
+        likeCount: ct.content.likeCount,
+        passCount: ct.content.passCount,
+        publishedAt: ct.content.publishedAt,
+        period,
+        targetVotes: configs.ranking.targetVotes,
+      }),
+    }));
 
   eligible.sort((a, b) => {
     if (b.rankingScore !== a.rankingScore) return b.rankingScore - a.rankingScore;
@@ -121,7 +154,7 @@ export async function recalculateTagRanking(tagId: string, period: "ALL_TIME" | 
       const rank = i + 1;
       await tx.contentTag.update({
         where: { id: ct.id },
-        data: { previousRank: ct.currentRank, currentRank: rank },
+        data: { previousRank: ct.currentRank, currentRank: rank, rankingScore: ct.rankingScore },
       });
       await tx.rankingSnapshot.create({
         data: {
@@ -136,4 +169,15 @@ export async function recalculateTagRanking(tagId: string, period: "ALL_TIME" | 
       });
     }
   });
+}
+
+function getPeriodStart(period: "ALL_TIME" | "DAILY" | "WEEKLY" | "MONTHLY"): Date | null {
+  if (period === "ALL_TIME") return null;
+  const now = Date.now();
+  const hours: Record<string, number> = {
+    DAILY: 24,
+    WEEKLY: 24 * 7,
+    MONTHLY: 24 * 30,
+  };
+  return new Date(now - (hours[period] ?? 24) * 60 * 60 * 1000);
 }

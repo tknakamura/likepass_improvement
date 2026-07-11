@@ -59,6 +59,7 @@ export const config = {
     "/evaluate/:path*",
     "/upload/:path*",
     "/onboarding/:path*",
+    "/discover/:path*",
     "/me/:path*",
     "/notifications/:path*",
     "/admin/:path*",

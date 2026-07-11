@@ -11,6 +11,7 @@ export default function SetupPage() {
   const [username, setUsername] = useState("");
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -27,6 +28,7 @@ export default function SetupPage() {
           username,
           termsAccepted,
           privacyAccepted,
+          ageConfirmed,
         }),
       });
 
@@ -93,6 +95,17 @@ export default function SetupPage() {
                 <a href="/privacy" className="underline" target="_blank">プライバシーポリシー</a>
                 に同意します
               </span>
+            </label>
+
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={ageConfirmed}
+                onChange={(e) => setAgeConfirmed(e.target.checked)}
+                className="mt-1"
+                required
+              />
+              <span>18歳以上であることを確認します</span>
             </label>
 
             {error && <p className="text-sm text-[var(--destructive)]">{error}</p>}

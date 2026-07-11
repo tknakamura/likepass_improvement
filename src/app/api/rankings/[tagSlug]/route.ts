@@ -1,15 +1,30 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { getAppConfigs } from "@/lib/app-config";
 import { getPublicImageUrl } from "@/lib/r2";
-import { meetsRankingEligibility } from "@/server/services/ranking/scoring";
+import { computeRankingScore, meetsRankingEligibility } from "@/server/services/ranking/scoring";
+
+const PERIODS = ["ALL_TIME", "DAILY", "WEEKLY", "MONTHLY"] as const;
+type Period = (typeof PERIODS)[number];
+
+function getPeriodStart(period: Period): Date | null {
+  if (period === "ALL_TIME") return null;
+  const hours: Record<string, number> = { DAILY: 24, WEEKLY: 168, MONTHLY: 720 };
+  return new Date(Date.now() - (hours[period] ?? 24) * 60 * 60 * 1000);
+}
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ tagSlug: string }> }
 ) {
   const session = await auth();
   const { tagSlug } = await params;
+  const { searchParams } = new URL(request.url);
+  const periodParam = searchParams.get("period") ?? "ALL_TIME";
+  const period = PERIODS.includes(periodParam as Period) ? (periodParam as Period) : "ALL_TIME";
+  const periodStart = getPeriodStart(period);
+  const configs = await getAppConfigs();
 
   const tag = await prisma.tag.findUnique({ where: { slug: tagSlug } });
   if (!tag) {
@@ -31,19 +46,37 @@ export async function GET(
     where: {
       tagId: tag.id,
       status: "ACTIVE",
-      content: { status: "ACTIVE" },
+      content: {
+        status: "ACTIVE",
+        ...(periodStart ? { publishedAt: { gte: periodStart } } : {}),
+      },
     },
     include: { content: true },
-    orderBy: [{ currentRank: "asc" }, { rankingScore: "desc" }],
-    take: 100,
   });
 
-  const eligible = contentTags.filter((ct) =>
-    meetsRankingEligibility(ct.content.likeCount, ct.content.passCount)
-  );
+  const eligible = contentTags
+    .filter((ct) =>
+      meetsRankingEligibility(
+        ct.content.likeCount,
+        ct.content.passCount,
+        configs.ranking.minVotes,
+        configs.ranking.minLikes
+      )
+    )
+    .map((ct) => ({
+      ct,
+      score: computeRankingScore({
+        likeCount: ct.content.likeCount,
+        passCount: ct.content.passCount,
+        publishedAt: ct.content.publishedAt,
+        period,
+        targetVotes: configs.ranking.targetVotes,
+      }),
+    }))
+    .sort((a, b) => b.score - a.score);
 
-  const items = eligible.map((ct, index) => {
-    const rank = ct.currentRank ?? index + 1;
+  const items = eligible.map(({ ct }, index) => {
+    const rank = index + 1;
     const isUnlocked = session?.user ? votedIds.has(ct.contentId) : false;
 
     if (!isUnlocked) {
@@ -67,7 +100,7 @@ export async function GET(
 
   return NextResponse.json({
     tag: { slug: tag.slug, displayName: tag.displayName },
-    period: "ALL_TIME",
+    period,
     items: displayItems,
     progress: {
       unlocked: unlockedInTop,

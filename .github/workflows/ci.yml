@@ -60,6 +60,7 @@ jobs:
       - run: npm start &
         env:
           PORT: 3000
+          DEMO_MODE: "true"
 
       - run: npx wait-on http://localhost:3000 --timeout 60000
 
@@ -67,3 +68,4 @@ jobs:
         env:
           CI: true
           APP_URL: http://localhost:3000
+          DEMO_MODE: "true"

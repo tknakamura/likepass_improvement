@@ -50,6 +50,10 @@ export default function OnboardingPage() {
       body: "LIKEは「このランキングに残したい」、PASSは「今回は見送る」です。PASSは攻撃ではなく品質向上への投票です。",
     },
     {
+      title: "ランキングの開放",
+      body: "タグランキングでは、評価していない写真はマスク表示されます。LIKEまたはPASSすると順位が開放され、写真が見えるようになります。",
+    },
+    {
       title: "興味のあるタグを選択",
       body: "3〜10個のタグを選んでください。評価キューに反映されます。",
     },
@@ -69,6 +73,11 @@ export default function OnboardingPage() {
             </Button>
           )}
           {step === 1 && (
+            <Button className="w-full" onClick={() => setStep(2)}>
+              次へ
+            </Button>
+          )}
+          {step === 2 && (
             <>
               <div className="flex flex-wrap gap-2">
                 {tags.map((tag) => (
