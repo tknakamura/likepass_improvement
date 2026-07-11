@@ -12,12 +12,21 @@ export async function getBoss(): Promise<PgBoss | null> {
 }
 
 export async function enqueueJob(name: string, data: Record<string, unknown>) {
+  const processInline =
+    process.env.DEMO_MODE === "true" ||
+    process.env.PROCESS_JOBS_INLINE === "true" ||
+    process.env.NODE_ENV === "development";
+
+  if (processInline) {
+    const { processJobInline } = await import("@/lib/jobs/handlers");
+    await processJobInline(name, data);
+    return;
+  }
+
   const b = await getBoss();
   if (!b) {
-    if (process.env.NODE_ENV === "development") {
-      const { processJobInline } = await import("@/lib/jobs/handlers");
-      await processJobInline(name, data);
-    }
+    const { processJobInline } = await import("@/lib/jobs/handlers");
+    await processJobInline(name, data);
     return;
   }
   await b.send(name, data);

@@ -32,6 +32,15 @@ export default function UploadPage() {
           body: file,
           headers: { "Content-Type": file.type },
         });
+      } else if (presignData.mockMode) {
+        setStatus("画像を保存中...");
+        const form = new FormData();
+        form.append("contentId", presignData.contentId);
+        form.append("file", file);
+        const direct = await fetch("/api/uploads/direct", { method: "POST", body: form });
+        if (!direct.ok) {
+          throw new Error("direct upload failed");
+        }
       }
 
       setStatus("処理を開始しています...");

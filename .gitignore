@@ -26,8 +26,9 @@ yarn-error.log*
 *.swp
 *.swo
 
-# OS
-.DS_Store
+# Local uploads (dev/demo without R2)
+.data/
+
 Thumbs.db
 
 # Test

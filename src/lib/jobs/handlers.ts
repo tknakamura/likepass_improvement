@@ -2,6 +2,7 @@ import sharp from "sharp";
 import { prisma } from "@/lib/db";
 import { getImageAnalysisProvider } from "@/lib/ai/image-analysis";
 import { getObjectBuffer, putObject } from "@/lib/r2";
+import { readLocalImage, saveLocalImage, isR2Configured } from "@/lib/local-images";
 import { recalculateTagRanking } from "@/server/services/content/aggregates";
 import type { TagCategory } from "@prisma/client";
 
@@ -20,7 +21,10 @@ async function processImage(contentId: string) {
   let buffer: Buffer;
   if (content.originalObjectKey) {
     const fetched = await getObjectBuffer(content.originalObjectKey);
-    buffer = fetched ?? await generatePlaceholder();
+    buffer =
+      fetched ??
+      (await readLocalImage(content.originalObjectKey)) ??
+      (await generatePlaceholder());
   } else {
     buffer = await generatePlaceholder();
   }
@@ -35,11 +39,19 @@ async function processImage(contentId: string) {
   const thumbKey = `processed/${contentId}/thumbnail.webp`;
 
   try {
-    await putObject(largeKey, large, "image/webp");
-    await putObject(mediumKey, medium, "image/webp");
-    await putObject(thumbKey, thumbnail, "image/webp");
+    if (isR2Configured()) {
+      await putObject(largeKey, large, "image/webp");
+      await putObject(mediumKey, medium, "image/webp");
+      await putObject(thumbKey, thumbnail, "image/webp");
+    } else {
+      await saveLocalImage(largeKey, large);
+      await saveLocalImage(mediumKey, medium);
+      await saveLocalImage(thumbKey, thumbnail);
+    }
   } catch {
-    // R2 not configured in dev - keys still stored
+    await saveLocalImage(largeKey, large);
+    await saveLocalImage(mediumKey, medium);
+    await saveLocalImage(thumbKey, thumbnail);
   }
 
   const provider = getImageAnalysisProvider();
