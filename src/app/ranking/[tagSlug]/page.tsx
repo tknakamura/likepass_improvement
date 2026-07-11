@@ -31,15 +31,15 @@ export default function TagRankingPage({ params }: { params: Promise<{ tagSlug: 
   }, [params]);
 
   if (!data) {
-    return <div className="container mx-auto px-2 py-8 text-center text-sm">読み込み中...</div>;
+    return <div className="container mx-auto px-4 py-8 text-center text-sm max-w-2xl">読み込み中...</div>;
   }
 
   const items = data.items.slice(0, DISPLAY_LIMIT);
   const remaining = data.progress.total - data.progress.unlocked;
 
   return (
-    <div className="container mx-auto px-2 py-4 max-w-6xl">
-      <div className="mb-4 px-2 sticky top-0 z-20 bg-[var(--background)] py-2">
+    <div className="container mx-auto px-4 py-4 max-w-2xl">
+      <div className="mb-4 sticky top-0 z-20 bg-[var(--background)] py-2">
         <h1 className="text-xl font-bold">#{data.tag.slug}</h1>
         <p className="text-sm text-[var(--muted-foreground)]">
           開放 {data.progress.unlocked} / {data.progress.total}
@@ -50,7 +50,7 @@ export default function TagRankingPage({ params }: { params: Promise<{ tagSlug: 
         </p>
       </div>
 
-      <div className="grid grid-cols-5 gap-1 sm:gap-1.5">
+      <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
         {items.map((item) => (
           <div
             key={item.rank}
@@ -66,7 +66,7 @@ export default function TagRankingPage({ params }: { params: Promise<{ tagSlug: 
                 fill
                 className="object-cover"
                 unoptimized
-                sizes="20vw"
+                sizes="33vw"
               />
             ) : (
               <div className="absolute inset-0 bg-zinc-300 dark:bg-zinc-700" />
@@ -76,7 +76,7 @@ export default function TagRankingPage({ params }: { params: Promise<{ tagSlug: 
       </div>
 
       {data.progress.unlocked < data.progress.total && (
-        <div className="mt-6 px-2 text-center pb-8">
+        <div className="mt-6 text-center pb-8">
           <Button asChild size="lg" className="w-full max-w-md">
             <Link href="/evaluate">ランダム評価を続ける</Link>
           </Button>

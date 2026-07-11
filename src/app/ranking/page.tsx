@@ -62,7 +62,7 @@ export default async function RankingIndexPage() {
 
   return (
     <div className="container mx-auto px-4 py-6 max-w-2xl">
-      <div className="mb-4 px-1 flex items-end justify-between gap-4">
+      <div className="mb-4 flex items-end justify-between gap-4">
         <h1 className="text-xl font-bold">タグランキング</h1>
         {session?.user && (
           <p className="text-sm text-[var(--muted-foreground)] tabular-nums shrink-0">
