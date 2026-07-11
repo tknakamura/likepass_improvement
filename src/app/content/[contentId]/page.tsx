@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import Image from "next/image";
 import { getPublicImageUrl } from "@/lib/r2";
 import { auth } from "@/lib/auth";
+import { getContentStatusHint, getContentStatusLabel } from "@/lib/content-status";
 
 export default async function ContentDetailPage({
   params,
@@ -44,8 +45,8 @@ export default async function ContentDetailPage({
       </p>
       {isOwner && (
         <p className="text-sm mt-2">
-          ステータス: {content.status}
-          {content.status === "DORMANT" && " — 現在、ランキング対象外"}
+          ステータス: {getContentStatusLabel(content.status)}
+          {getContentStatusHint(content.status) && ` — ${getContentStatusHint(content.status)}`}
         </p>
       )}
       {(isOwner || session?.user) && (
