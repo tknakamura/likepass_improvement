@@ -66,7 +66,11 @@ export default function TagRankingPage({ params }: { params: Promise<{ tagSlug: 
       <div className="mb-4 sticky top-0 z-20 bg-[var(--background)] py-2 space-y-2">
         <div className="flex items-center justify-between gap-2">
           <h1 className="text-xl font-bold">#{data.tag.slug}</h1>
-          <div className="flex gap-1">
+          <div className="flex items-center gap-2">
+            <Button asChild size="sm" variant="outline">
+              <Link href={`/evaluate?tags=${encodeURIComponent(data.tag.slug)}`}>評価する</Link>
+            </Button>
+            <div className="flex gap-1">
             {PERIODS.map((p) => (
               <button
                 key={p.key}
@@ -81,6 +85,7 @@ export default function TagRankingPage({ params }: { params: Promise<{ tagSlug: 
                 {p.label}
               </button>
             ))}
+            </div>
           </div>
         </div>
         <p className="text-sm text-[var(--muted-foreground)]">
@@ -131,16 +136,16 @@ export default function TagRankingPage({ params }: { params: Promise<{ tagSlug: 
         ))}
       </div>
 
-      {data.progress.unlocked < data.progress.total && (
-        <div className="mt-6 text-center pb-8">
-          <Button asChild size="lg" className="w-full max-w-md">
-            <Link href="/evaluate">ランダム評価を続ける</Link>
-          </Button>
-          <p className="text-xs text-[var(--muted-foreground)] mt-2">
-            順位を指定して評価することはできません
-          </p>
-        </div>
-      )}
+      <div className="mt-6 text-center pb-8">
+        <Button asChild size="lg" className="w-full max-w-md">
+          <Link href={`/evaluate?tags=${encodeURIComponent(data.tag.slug)}`}>
+            #{data.tag.slug} を評価する
+          </Link>
+        </Button>
+        <p className="text-xs text-[var(--muted-foreground)] mt-2">
+          順位を指定して評価することはできません
+        </p>
+      </div>
     </div>
   );
 }
