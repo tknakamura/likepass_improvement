@@ -1,0 +1,197 @@
+import { z } from "zod";
+
+export const TAG_CATEGORIES = ["SUBJECT", "SCENE", "STYLE", "ATTRIBUTE", "LOCATION"] as const;
+export type TagCategory = (typeof TAG_CATEGORIES)[number];
+
+export interface TagSuggestion {
+  name: string;
+  confidence: number;
+  category: TagCategory;
+}
+
+export interface ImageQualityMetrics {
+  blur: number;
+  aesthetic: number;
+  textDominance: number;
+}
+
+export interface SafetyResult {
+  status: "SAFE" | "REVIEW_REQUIRED" | "REJECTED";
+  reasons: string[];
+}
+
+export interface ImageAnalysisResult {
+  tags: TagSuggestion[];
+  quality: ImageQualityMetrics;
+  safety: SafetyResult;
+  aiGeneratedLikelihood?: number;
+}
+
+const TAG_SYNONYMS: Record<string, string> = {
+  nighttime: "night",
+  evening: "night",
+  urban: "city",
+  cities: "city",
+  town: "city",
+  streets: "street",
+  roadway: "street",
+  monochrome: "monochrome",
+  blackandwhite: "monochrome",
+  bw: "monochrome",
+  minimalist: "minimal",
+  food: "ramen",
+  noodle: "ramen",
+  noodles: "ramen",
+  puppy: "dog",
+  kitten: "cat",
+  seaside: "beach",
+  ocean: "beach",
+  coast: "beach",
+  coffee: "cafe",
+  restaurant: "cafe",
+  building: "architecture",
+  buildings: "architecture",
+  landscape: "mountain",
+  hiking: "mountain",
+  japan: "japan",
+  kyoto: "kyoto",
+  osaka: "osaka",
+};
+
+const rawTagSchema = z.object({
+  name: z.union([z.string(), z.number()]).transform(String),
+  confidence: z.union([z.number(), z.string()]).optional(),
+  category: z.string().optional(),
+});
+
+const rawAnalysisSchema = z.object({
+  tags: z.array(rawTagSchema).optional(),
+  quality: z
+    .object({
+      blur: z.union([z.number(), z.string()]).optional(),
+      aesthetic: z.union([z.number(), z.string()]).optional(),
+      textDominance: z.union([z.number(), z.string()]).optional(),
+    })
+    .optional(),
+  safety: z
+    .object({
+      status: z.string().optional(),
+      reasons: z.array(z.string()).optional(),
+    })
+    .optional(),
+  aiGeneratedLikelihood: z.union([z.number(), z.string()]).optional(),
+});
+
+export function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(1, Math.max(0, value));
+}
+
+export function parseMetric(value: unknown, fallback: number): number {
+  const num = typeof value === "string" ? Number.parseFloat(value) : Number(value);
+  return clamp01(Number.isFinite(num) ? num : fallback);
+}
+
+export function normalizeTagSlug(name: string): string {
+  const compact = name
+    .trim()
+    .toLowerCase()
+    .replace(/[#\s_]+/g, "")
+    .replace(/[^a-z0-9]/g, "");
+
+  if (!compact) return "";
+  return TAG_SYNONYMS[compact] ?? compact;
+}
+
+function normalizeCategory(value: string | undefined): TagCategory {
+  const upper = (value ?? "SUBJECT").trim().toUpperCase();
+  if ((TAG_CATEGORIES as readonly string[]).includes(upper)) {
+    return upper as TagCategory;
+  }
+
+  const aliases: Record<string, TagCategory> = {
+    SUBJECT: "SUBJECT",
+    MAIN: "SUBJECT",
+    OBJECT: "SUBJECT",
+    SCENE: "SCENE",
+    PLACE: "SCENE",
+    SETTING: "SCENE",
+    STYLE: "STYLE",
+    MOOD: "STYLE",
+    ATTRIBUTE: "ATTRIBUTE",
+    QUALITY: "ATTRIBUTE",
+    LOCATION: "LOCATION",
+    REGION: "LOCATION",
+    GEO: "LOCATION",
+  };
+
+  return aliases[upper] ?? "SUBJECT";
+}
+
+function normalizeSafetyStatus(value: string | undefined): SafetyResult["status"] {
+  const upper = (value ?? "REVIEW_REQUIRED").trim().toUpperCase();
+  if (upper === "SAFE" || upper === "REVIEW_REQUIRED" || upper === "REJECTED") {
+    return upper;
+  }
+  return "REVIEW_REQUIRED";
+}
+
+function dedupeTags(tags: TagSuggestion[]): TagSuggestion[] {
+  const bySlug = new Map<string, TagSuggestion>();
+  for (const tag of tags) {
+    const slug = normalizeTagSlug(tag.name);
+    if (!slug) continue;
+    const normalized = { ...tag, name: slug };
+    const existing = bySlug.get(slug);
+    if (!existing || normalized.confidence > existing.confidence) {
+      bySlug.set(slug, normalized);
+    }
+  }
+  return [...bySlug.values()].sort((a, b) => b.confidence - a.confidence);
+}
+
+export function parseImageAnalysisResponse(raw: unknown): ImageAnalysisResult | null {
+  const parsed = rawAnalysisSchema.safeParse(raw);
+  if (!parsed.success) return null;
+
+  const tags = dedupeTags(
+    (parsed.data.tags ?? [])
+      .map((tag) => {
+        const slug = normalizeTagSlug(tag.name);
+        if (!slug || slug.length < 2) return null;
+        return {
+          name: slug,
+          confidence: clamp01(parseMetric(tag.confidence, 0.7)),
+          category: normalizeCategory(tag.category),
+        };
+      })
+      .filter((tag): tag is TagSuggestion => tag !== null),
+  ).slice(0, 5);
+
+  if (tags.length === 0) return null;
+
+  const quality = parsed.data.quality ?? {};
+  const safety = parsed.data.safety ?? {};
+
+  return {
+    tags,
+    quality: {
+      blur: parseMetric(quality.blur, 0.1),
+      aesthetic: parseMetric(quality.aesthetic, 0.5),
+      textDominance: parseMetric(quality.textDominance, 0.02),
+    },
+    safety: {
+      status: normalizeSafetyStatus(safety.status),
+      reasons: safety.reasons ?? [],
+    },
+    aiGeneratedLikelihood: parseMetric(parsed.data.aiGeneratedLikelihood, 0.1),
+  };
+}
+
+export function createReviewRequiredResult(reason: string): ImageAnalysisResult {
+  return {
+    tags: [],
+    quality: { blur: 0.5, aesthetic: 0.5, textDominance: 0.5 },
+    safety: { status: "REVIEW_REQUIRED", reasons: [reason] },
+  };
+}

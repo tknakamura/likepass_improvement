@@ -40,9 +40,11 @@ services:
       - key: R2_PUBLIC_BASE_URL
         sync: false
       - key: IMAGE_AI_PROVIDER
-        value: mock
+        value: openai
       - key: IMAGE_AI_API_KEY
         sync: false
+      - key: IMAGE_AI_MODEL
+        value: gpt-4o
       - key: ADMIN_EMAIL_ALLOWLIST
         sync: false
       - key: SENTRY_DSN
@@ -71,6 +73,8 @@ services:
       - key: R2_BUCKET_NAME
         sync: false
       - key: IMAGE_AI_PROVIDER
-        value: mock
+        value: openai
       - key: IMAGE_AI_API_KEY
         sync: false
+      - key: IMAGE_AI_MODEL
+        value: gpt-4o

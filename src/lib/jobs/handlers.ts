@@ -1,6 +1,7 @@
 import sharp from "sharp";
 import { prisma } from "@/lib/db";
 import { getImageAnalysisProvider } from "@/lib/ai/image-analysis";
+import { normalizeTagSlug } from "@/lib/ai/image-analysis-schema";
 import { getObjectBuffer, putObject } from "@/lib/r2";
 import { readLocalImage, saveLocalImage, isR2Configured } from "@/lib/local-images";
 import { recalculateTagRanking } from "@/server/services/content/aggregates";
@@ -54,8 +55,15 @@ async function processImage(contentId: string) {
     await saveLocalImage(thumbKey, thumbnail);
   }
 
+  const knownTags = await prisma.tag.findMany({
+    where: { status: "ACTIVE" },
+    orderBy: { usageCount: "desc" },
+    take: 50,
+    select: { slug: true, category: true, displayName: true },
+  });
+
   const provider = getImageAnalysisProvider();
-  const analysis = await provider.analyze(buffer, content.mimeType ?? "image/jpeg");
+  const analysis = await provider.analyze(buffer, content.mimeType ?? "image/jpeg", { knownTags });
 
   let status: "EXPLORING" | "REVIEW_REQUIRED" | "REJECTED" = "EXPLORING";
   if (analysis.safety.status === "REJECTED") status = "REJECTED";
@@ -78,7 +86,8 @@ async function processImage(contentId: string) {
   });
 
   for (const tag of analysis.tags.slice(0, 5)) {
-    const slug = tag.name.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const slug = normalizeTagSlug(tag.name);
+    if (!slug) continue;
     const dbTag = await prisma.tag.upsert({
       where: { slug },
       create: {
