@@ -16,6 +16,7 @@
     "db:migrate": "prisma migrate deploy",
     "db:migrate:dev": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed:essentials": "tsx scripts/seed-essentials.ts",
     "worker": "tsx src/worker/index.ts",
     "reprocess:stuck": "tsx scripts/reprocess-stuck.ts",
     "postinstall": "prisma generate"

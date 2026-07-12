@@ -1,22 +1,9 @@
-import { PrismaClient, TagCategory } from "@prisma/client";
+import { PrismaClient } from "@prisma/client";
 import { computeLikeRate, wilsonLowerBound, computeRankingScore } from "../src/server/services/ranking/scoring";
+import { SEED_TAGS } from "../src/lib/seed/data";
+import { seedEssentials } from "../src/lib/seed/essentials";
 
 const prisma = new PrismaClient();
-
-const SEED_TAGS: { slug: string; displayName: string; category: TagCategory }[] = [
-  { slug: "street", displayName: "Street", category: "SCENE" },
-  { slug: "night", displayName: "Night", category: "ATTRIBUTE" },
-  { slug: "tokyo", displayName: "Tokyo", category: "LOCATION" },
-  { slug: "dog", displayName: "Dog", category: "SUBJECT" },
-  { slug: "cat", displayName: "Cat", category: "SUBJECT" },
-  { slug: "sunset", displayName: "Sunset", category: "ATTRIBUTE" },
-  { slug: "beach", displayName: "Beach", category: "SCENE" },
-  { slug: "cafe", displayName: "Cafe", category: "SCENE" },
-  { slug: "minimal", displayName: "Minimal", category: "STYLE" },
-  { slug: "architecture", displayName: "Architecture", category: "SUBJECT" },
-  { slug: "ramen", displayName: "Ramen", category: "SUBJECT" },
-  { slug: "mountain", displayName: "Mountain", category: "SCENE" },
-];
 
 const DEMO_IMAGES: {
   seed: string;
@@ -61,22 +48,6 @@ const DEMO_IMAGES: {
   { seed: "lp-active-19", tags: ["ramen", "tokyo"], status: "ACTIVE", likeCount: 43, passCount: 8 },
   { seed: "lp-active-20", tags: ["dog", "beach"], status: "ACTIVE", likeCount: 50, passCount: 6 },
 ];
-
-const DEFAULT_CONFIG = {
-  dormant: {
-    earlyStopMinVotes: 20,
-    earlyStopMaxLikeRate: 0.15,
-    standardStopMinVotes: 50,
-    standardStopMaxLikeRate: 0.25,
-    wilsonStopMinVotes: 30,
-    wilsonStopUpperBound: 0.35,
-  },
-  ranking: {
-    minVotes: 20,
-    minLikes: 5,
-    targetVotes: 100,
-  },
-};
 
 function imageUrl(seed: string, size = 800) {
   return `https://picsum.photos/seed/${seed}/${size}/${size}`;
@@ -230,19 +201,7 @@ async function assignRanks() {
 }
 
 async function main() {
-  for (const tag of SEED_TAGS) {
-    await prisma.tag.upsert({
-      where: { slug: tag.slug },
-      create: tag,
-      update: { displayName: tag.displayName },
-    });
-  }
-
-  await prisma.appConfig.upsert({
-    where: { key: "defaults" },
-    create: { key: "defaults", value: DEFAULT_CONFIG },
-    update: { value: DEFAULT_CONFIG },
-  });
+  await seedEssentials(prisma);
 
   const { poster } = await seedDemoUsers();
   const contentCount = await seedDemoContent(poster.id);
