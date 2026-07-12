@@ -44,6 +44,25 @@ async function loadDemoUser() {
   return prisma.user.findUnique({ where: { email: "demo@likepass.local" } });
 }
 
+function applyUserToToken(
+  token: import("@auth/core/jwt").JWT,
+  user: {
+    id: string;
+    username?: string | null;
+    status: UserStatus;
+    role: UserRole;
+    onboardingCompletedAt?: Date | null;
+    termsAcceptedAt?: Date | null;
+  }
+) {
+  token.sub = user.id;
+  token.username = user.username;
+  token.status = user.status;
+  token.role = user.role;
+  token.onboardingCompletedAt = user.onboardingCompletedAt?.toISOString() ?? null;
+  token.termsAcceptedAt = user.termsAcceptedAt?.toISOString() ?? null;
+}
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
   adapter: demoMode ? undefined : PrismaAdapter(prisma),
@@ -52,26 +71,31 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async jwt({ token, user, account }) {
       if (account?.provider === "demo") {
         const demoUser = await loadDemoUser();
-        if (demoUser) {
-          token.sub = demoUser.id;
-          token.username = demoUser.username;
-          token.status = demoUser.status;
-          token.role = demoUser.role;
-          token.onboardingCompletedAt = demoUser.onboardingCompletedAt?.toISOString() ?? null;
-          token.termsAcceptedAt = demoUser.termsAcceptedAt?.toISOString() ?? null;
-        }
-      } else if (user) {
-        token.sub = user.id;
-        token.username = user.username;
-        token.status = user.status;
-        token.role = user.role;
-        token.onboardingCompletedAt = user.onboardingCompletedAt?.toISOString() ?? null;
-        token.termsAcceptedAt = user.termsAcceptedAt?.toISOString() ?? null;
+        if (demoUser) applyUserToToken(token, demoUser);
+        return token;
       }
+
+      if (user?.id) {
+        applyUserToToken(token, user as {
+          id: string;
+          username?: string | null;
+          status: UserStatus;
+          role: UserRole;
+          onboardingCompletedAt?: Date | null;
+          termsAcceptedAt?: Date | null;
+        });
+        return token;
+      }
+
+      if (token.sub) {
+        const dbUser = await prisma.user.findUnique({ where: { id: token.sub } });
+        if (dbUser) applyUserToToken(token, dbUser);
+      }
+
       return token;
     },
-    async session({ session, token, user }) {
-      if (demoMode && token?.sub) {
+    async session({ session, token }) {
+      if (session.user && token?.sub) {
         session.user.id = token.sub;
         session.user.username = token.username as string | null;
         session.user.status = (token.status as UserStatus) ?? "ACTIVE";
@@ -82,13 +106,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         session.user.termsAcceptedAt = token.termsAcceptedAt
           ? new Date(token.termsAcceptedAt as string)
           : null;
-      } else if (user && session.user) {
-        session.user.id = user.id;
-        session.user.username = user.username;
-        session.user.status = user.status;
-        session.user.role = user.role;
-        session.user.onboardingCompletedAt = user.onboardingCompletedAt;
-        session.user.termsAcceptedAt = user.termsAcceptedAt;
       }
       return session;
     },

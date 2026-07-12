@@ -39,7 +39,8 @@ export const authConfig = {
     signIn: "/signin",
   },
   session: {
-    strategy: demoMode ? "jwt" : "database",
+    // JWT is required for Edge middleware (PrismaAdapter is unavailable there).
+    strategy: "jwt",
   },
   trustHost: process.env.AUTH_TRUST_HOST === "true",
   secret: process.env.AUTH_SECRET,
