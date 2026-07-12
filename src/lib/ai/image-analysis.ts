@@ -1,7 +1,7 @@
 import sharp from "sharp";
 import {
   type ImageAnalysisResult,
-  createReviewRequiredResult,
+  createSafeFallbackResult,
   parseImageAnalysisResponse,
 } from "@/lib/ai/image-analysis-schema";
 import {
@@ -151,7 +151,7 @@ export class OpenAIImageAnalysisProvider implements ImageAnalysisProvider {
       if (!response.ok) {
         const errorBody = await response.text();
         console.error("[image-analysis] OpenAI API error", response.status, errorBody.slice(0, 500));
-        return createReviewRequiredResult("openai_api_error");
+        return createSafeFallbackResult("openai_api_error");
       }
 
       const data = await response.json();
@@ -159,13 +159,13 @@ export class OpenAIImageAnalysisProvider implements ImageAnalysisProvider {
       const parsed = parseImageAnalysisResponse(extractJsonObject(text));
       if (!parsed) {
         console.error("[image-analysis] Failed to parse OpenAI response", text.slice(0, 500));
-        return createReviewRequiredResult("parse_error");
+        return createSafeFallbackResult("parse_error");
       }
 
       return parsed;
     } catch (error) {
       console.error("[image-analysis] OpenAI request failed", error);
-      return createReviewRequiredResult("openai_request_failed");
+      return createSafeFallbackResult("openai_request_failed");
     }
   }
 }

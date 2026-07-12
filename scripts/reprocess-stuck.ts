@@ -3,26 +3,26 @@ import { processJobInline } from "../src/lib/jobs/handlers";
 
 async function main() {
   const stuck = await prisma.content.findMany({
-    where: { status: "PROCESSING" },
-    select: { id: true, createdAt: true },
+    where: { status: { in: ["PROCESSING", "REVIEW_REQUIRED"] } },
+    select: { id: true, status: true, createdAt: true },
     orderBy: { createdAt: "asc" },
   });
 
   if (stuck.length === 0) {
-    console.log("No PROCESSING contents found.");
+    console.log("No PROCESSING or REVIEW_REQUIRED contents found.");
     return;
   }
 
   console.log(`Reprocessing ${stuck.length} content(s)...`);
 
-  for (const { id } of stuck) {
+  for (const { id, status } of stuck) {
     try {
       await processJobInline("process_image", { contentId: id });
       const updated = await prisma.content.findUnique({
         where: { id },
         select: { status: true },
       });
-      console.log(`- ${id}: ${updated?.status ?? "unknown"}`);
+      console.log(`- ${id} (${status} -> ${updated?.status ?? "unknown"})`);
     } catch (error) {
       console.error(`- ${id}: failed`, error);
     }
