@@ -2,12 +2,14 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
 
 export default function SetupPage() {
   const router = useRouter();
+  const { update } = useSession();
   const [username, setUsername] = useState("");
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
@@ -38,6 +40,7 @@ export default function SetupPage() {
         return;
       }
 
+      await update();
       router.push("/onboarding");
       router.refresh();
     } catch {

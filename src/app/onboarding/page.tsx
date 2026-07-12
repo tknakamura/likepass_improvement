@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -13,6 +14,7 @@ interface Tag {
 
 export default function OnboardingPage() {
   const router = useRouter();
+  const { update } = useSession();
   const [tags, setTags] = useState<Tag[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [step, setStep] = useState(0);
@@ -35,13 +37,20 @@ export default function OnboardingPage() {
 
   async function completeOnboarding() {
     setLoading(true);
-    await fetch("/api/me/onboarding", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tagIds: Array.from(selected) }),
-    });
-    router.push("/evaluate");
-    router.refresh();
+    try {
+      const res = await fetch("/api/me/onboarding", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tagIds: Array.from(selected) }),
+      });
+      if (!res.ok) return;
+
+      await update();
+      router.push("/evaluate");
+      router.refresh();
+    } finally {
+      setLoading(false);
+    }
   }
 
   const steps = [

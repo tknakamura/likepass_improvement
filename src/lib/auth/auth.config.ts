@@ -2,6 +2,7 @@ import type { NextAuthConfig } from "next-auth";
 import Google from "next-auth/providers/google";
 import Credentials from "next-auth/providers/credentials";
 import { ensureAuthUrl } from "@/lib/auth/ensure-auth-url";
+import { mapTokenToSession } from "@/lib/auth/map-token-to-session";
 
 ensureAuthUrl();
 
@@ -45,6 +46,9 @@ export const authConfig = {
   trustHost: process.env.AUTH_TRUST_HOST === "true",
   secret: process.env.AUTH_SECRET,
   callbacks: {
+    async session({ session, token }) {
+      return mapTokenToSession(session, token);
+    },
     authorized({ auth, request: { nextUrl } }) {
       const protectedPaths = ["/evaluate", "/upload", "/onboarding", "/me", "/notifications", "/admin"];
       const isProtected = protectedPaths.some(
