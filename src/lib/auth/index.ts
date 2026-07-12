@@ -2,6 +2,7 @@ import NextAuth from "next-auth";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/db";
 import { authConfig } from "@/lib/auth/auth.config";
+import { mapTokenToSession } from "@/lib/auth/map-token-to-session";
 import type { UserRole, UserStatus } from "@prisma/client";
 
 const demoMode = process.env.DEMO_MODE === "true";
@@ -95,19 +96,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return token;
     },
     async session({ session, token }) {
-      if (session.user && token?.sub) {
-        session.user.id = token.sub;
-        session.user.username = token.username as string | null;
-        session.user.status = (token.status as UserStatus) ?? "ACTIVE";
-        session.user.role = (token.role as UserRole) ?? "USER";
-        session.user.onboardingCompletedAt = token.onboardingCompletedAt
-          ? new Date(token.onboardingCompletedAt as string)
-          : null;
-        session.user.termsAcceptedAt = token.termsAcceptedAt
-          ? new Date(token.termsAcceptedAt as string)
-          : null;
-      }
-      return session;
+      return mapTokenToSession(session, token);
     },
     async signIn({ user, account }) {
       if (account?.provider === "demo") {
