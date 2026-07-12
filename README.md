@@ -88,6 +88,59 @@ Render Blueprint (`render.yaml`) を使用:
 
 Blueprint 適用後のサービス: `likepass-web` / `likepass-worker` / `likepass-db`
 
+## Cloudflare R2 設定（本番の画像保存）
+
+Render のディスクは一時的なため、**本番の写真アップロードには R2 が必要**です。
+
+### 1. Cloudflare で R2 バケットを作成
+
+1. [Cloudflare Dashboard](https://dash.cloudflare.com/) → **R2 Object Storage**
+2. **Create bucket** → 名前例: `likepass-images`
+3. リージョンは任意（Automatic で可）
+
+### 2. API トークン（S3 互換キー）を発行
+
+1. R2 → **Manage R2 API Tokens** → **Create API token**
+2. 権限: 対象バケットに **Object Read & Write**
+3. 発行後に控える:
+   - Access Key ID → `R2_ACCESS_KEY_ID`
+   - Secret Access Key → `R2_SECRET_ACCESS_KEY`
+
+### 3. Account ID を控える
+
+Dashboard 右サイドバーまたは R2 概要の **Account ID** → `R2_ACCOUNT_ID`
+
+### 4. CORS を設定（ブラウザからの直接アップロードに必須）
+
+バケット → **Settings** → **CORS policy** → 例は `docs/r2-cors.example.json`
+
+本番 URL（`https://likepass-web.onrender.com`）とローカル（`http://localhost:3000`）を `AllowedOrigins` に含めてください。
+
+### 5. Render に環境変数を設定（Web + Worker 両方）
+
+| 変数名 | 値の例 |
+|--------|--------|
+| `R2_ACCOUNT_ID` | Cloudflare Account ID |
+| `R2_ACCESS_KEY_ID` | API トークンの Access Key |
+| `R2_SECRET_ACCESS_KEY` | API トークンの Secret |
+| `R2_BUCKET_NAME` | `likepass-images` |
+| `R2_PUBLIC_BASE_URL` | 任意（下記参照） |
+
+`R2_PUBLIC_BASE_URL` の選択肢:
+
+- **空欄でも可** — 画像は `https://likepass-web.onrender.com/api/images/...` 経由で配信
+- **R2 公開 URL / カスタムドメイン** — R2 の Public access または CDN ドメインを設定した場合にそのベース URL
+
+設定後、**likepass-web** と **likepass-worker** を再デプロイしてください。
+
+### 6. 動作確認
+
+1. ログイン → `/upload` から写真を投稿
+2. 処理完了後、画像が表示されること
+3. Worker ログに画像処理・AIタグのログが出ること
+
+R2 未設定時は `mockMode` でローカル保存にフォールバックしますが、**Render 本番では再起動で消える**ため R2 設定を推奨します。
+
 ## ライセンス
 
 Private
