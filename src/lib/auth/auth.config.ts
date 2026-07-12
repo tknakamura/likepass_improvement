@@ -1,6 +1,9 @@
 import type { NextAuthConfig } from "next-auth";
 import Google from "next-auth/providers/google";
 import Credentials from "next-auth/providers/credentials";
+import { ensureAuthUrl } from "@/lib/auth/ensure-auth-url";
+
+ensureAuthUrl();
 
 const demoMode = process.env.DEMO_MODE === "true";
 
