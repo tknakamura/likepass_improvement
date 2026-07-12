@@ -62,12 +62,17 @@ export async function getObjectBuffer(objectKey: string): Promise<Buffer | null>
   const bucket = process.env.R2_BUCKET_NAME;
   if (!client || !bucket) return null;
 
-  const response = await client.send(
-    new GetObjectCommand({ Bucket: bucket, Key: objectKey })
-  );
+  try {
+    const response = await client.send(
+      new GetObjectCommand({ Bucket: bucket, Key: objectKey })
+    );
 
-  const bytes = await response.Body?.transformToByteArray();
-  return bytes ? Buffer.from(bytes) : null;
+    const bytes = await response.Body?.transformToByteArray();
+    return bytes ? Buffer.from(bytes) : null;
+  } catch (error) {
+    console.warn(`[r2] Failed to fetch object ${objectKey}:`, error instanceof Error ? error.message : error);
+    return null;
+  }
 }
 
 export async function putObject(objectKey: string, body: Buffer, contentType: string): Promise<void> {

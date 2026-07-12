@@ -20,13 +20,28 @@ async function processImage(contentId: string) {
   if (!content) return;
 
   let buffer: Buffer;
+  let imageSource: "r2" | "local" | "placeholder" = "placeholder";
+
   if (content.originalObjectKey) {
     const fetched = await getObjectBuffer(content.originalObjectKey);
-    buffer =
-      fetched ??
-      (await readLocalImage(content.originalObjectKey)) ??
-      (await generatePlaceholder());
+    if (fetched) {
+      buffer = fetched;
+      imageSource = "r2";
+    } else {
+      const local = await readLocalImage(content.originalObjectKey);
+      if (local) {
+        buffer = local;
+        imageSource = "local";
+      } else {
+        console.warn(
+          `[process_image] Original not found (${content.originalObjectKey}); using placeholder`
+        );
+        buffer = await generatePlaceholder();
+        imageSource = "placeholder";
+      }
+    }
   } else {
+    console.warn(`[process_image] ${contentId} has no originalObjectKey; using placeholder`);
     buffer = await generatePlaceholder();
   }
 
@@ -120,6 +135,8 @@ async function processImage(contentId: string) {
       await recalculateTagRanking(ct.tagId);
     }
   }
+
+  console.log(`[process_image] ${contentId} -> ${status} (image: ${imageSource}, tags: ${analysis.tags.length})`);
 }
 
 async function generatePlaceholder(): Promise<Buffer> {
@@ -167,7 +184,13 @@ export async function startWorker() {
   await b!.work("process_image", async (jobs) => {
     const job = Array.isArray(jobs) ? jobs[0] : jobs;
     if (!job) return;
-    await processImage((job.data as { contentId: string }).contentId);
+    const contentId = (job.data as { contentId: string }).contentId;
+    try {
+      await processImage(contentId);
+    } catch (error) {
+      console.error(`[process_image] ${contentId} failed`, error);
+      throw error;
+    }
   });
 
   await b!.work("recalculate_ranking", async (jobs) => {

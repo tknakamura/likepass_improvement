@@ -13,6 +13,7 @@ const CATEGORY_GUIDE = `Tag categories (use exactly one per tag):
 
 const SELECTION_RULES = `Selection rules:
 - Return 1 to 5 tags that are visually evident in the photo
+- You MUST return at least 1 tag; never return an empty tags array
 - Prefer specific, concrete tags over vague ones (use "street" not "urban life")
 - Use lowercase single-word English slugs (a-z0-9 only, no spaces or hyphens)
 - Normalize synonyms (nighttime -> night, urban -> city, puppy -> dog)

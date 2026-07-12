@@ -155,10 +155,23 @@ export class OpenAIImageAnalysisProvider implements ImageAnalysisProvider {
       }
 
       const data = await response.json();
-      const text = data.choices?.[0]?.message?.content ?? "";
-      const parsed = parseImageAnalysisResponse(extractJsonObject(text));
+      const message = data.choices?.[0]?.message;
+      const text = message?.content ?? "";
+
+      if (message?.refusal) {
+        console.warn("[image-analysis] OpenAI refusal:", message.refusal);
+        return createSafeFallbackResult("openai_refusal");
+      }
+
+      if (!text.trim()) {
+        console.warn("[image-analysis] OpenAI returned empty content");
+        return createSafeFallbackResult("empty_response");
+      }
+
+      const raw = extractJsonObject(text);
+      const parsed = parseImageAnalysisResponse(raw);
       if (!parsed) {
-        console.error("[image-analysis] Failed to parse OpenAI response", text.slice(0, 500));
+        console.warn("[image-analysis] Unparseable OpenAI response, using fallback:", text.slice(0, 300));
         return createSafeFallbackResult("parse_error");
       }
 
