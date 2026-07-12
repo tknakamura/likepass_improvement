@@ -4,9 +4,8 @@ export const JOB_QUEUE_NAMES = ["process_image", "recalculate_ranking"] as const
 
 let boss: PgBoss | null = null;
 
-function getPgBossOptions(): string | ConstructorParameters<typeof PgBoss>[0] {
-  const url = process.env.DATABASE_URL;
-  if (!url) return url!;
+function getPgBossOptions(): PgBoss.ConstructorOptions {
+  const url = process.env.DATABASE_URL!;
 
   // Render Postgres requires TLS; pg-boss uses node-pg directly (unlike Prisma).
   if (process.env.NODE_ENV === "production" || url.includes("render.com")) {
@@ -16,7 +15,7 @@ function getPgBossOptions(): string | ConstructorParameters<typeof PgBoss>[0] {
     };
   }
 
-  return url;
+  return { connectionString: url };
 }
 
 async function ensureJobQueues(instance: PgBoss) {
