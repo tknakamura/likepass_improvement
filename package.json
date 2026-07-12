@@ -44,6 +44,8 @@
     "react-hook-form": "^7.56.1",
     "sharp": "^0.34.1",
     "tailwind-merge": "^3.2.0",
+    "tailwindcss": "^4.1.4",
+    "@tailwindcss/postcss": "^4.1.4",
     "uuid": "^11.1.0",
     "zod": "^3.24.3"
   },
@@ -53,7 +55,6 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.1",
     "@playwright/test": "^1.52.0",
-    "@tailwindcss/postcss": "^4.1.4",
     "@types/node": "^22.15.3",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
@@ -61,7 +62,6 @@
     "eslint": "^9.25.1",
     "eslint-config-next": "^15.3.1",
     "prisma": "^6.6.0",
-    "tailwindcss": "^4.1.4",
     "tsx": "^4.19.3",
     "typescript": "^5.8.3",
     "vitest": "^3.1.2",

@@ -13,7 +13,7 @@ services:
     plan: starter
     repo: https://github.com/tknakamura/likepass_improvement
     branch: main
-    buildCommand: npm ci && npm run build
+    buildCommand: npm ci --include=dev && npm run build
     startCommand: npx prisma migrate deploy && npm start
     healthCheckPath: /
     envVars:
@@ -63,7 +63,7 @@ services:
     plan: starter
     repo: https://github.com/tknakamura/likepass_improvement
     branch: main
-    buildCommand: npm ci && npx prisma generate
+    buildCommand: npm ci --include=dev && npx prisma generate
     startCommand: npm run worker
     envVars:
       - key: NODE_VERSION
