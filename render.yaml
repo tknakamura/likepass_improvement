@@ -29,6 +29,8 @@ services:
         generateValue: true
       - key: AUTH_TRUST_HOST
         value: "true"
+      - key: AUTH_URL
+        sync: false
       - key: DEMO_MODE
         value: "false"
       - key: AUTH_GOOGLE_ID
