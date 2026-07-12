@@ -11,6 +11,8 @@ services:
     runtime: node
     region: oregon
     plan: starter
+    repo: https://github.com/tknakamura/likepass_improvement
+    branch: main
     buildCommand: npm ci && npx prisma migrate deploy && npm run build
     startCommand: npm start
     healthCheckPath: /
@@ -55,6 +57,8 @@ services:
     runtime: node
     region: oregon
     plan: starter
+    repo: https://github.com/tknakamura/likepass_improvement
+    branch: main
     buildCommand: npm ci && npx prisma generate
     startCommand: npm run worker
     envVars:

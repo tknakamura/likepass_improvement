@@ -23,7 +23,7 @@
 ```bash
 git clone https://github.com/tknakamura/likepass_improvement.git
 cd likepass_improvement
-git checkout cursor/likepass-mvp-df00
+git checkout main
 
 chmod +x scripts/dev-local.sh
 ./scripts/dev-local.sh
@@ -79,8 +79,14 @@ npm run worker
 Render Blueprint (`render.yaml`) を使用:
 
 1. GitHub リポジトリを Render に接続
-2. Blueprint をデプロイ
-3. 環境変数（Google OAuth, R2 等）を Dashboard で設定
+2. [New Blueprint](https://dashboard.render.com/blueprints) から `render.yaml` をデプロイ
+3. 環境変数を Dashboard で設定:
+   - `IMAGE_AI_API_KEY`（Web + Worker 両方）
+   - `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET`
+   - R2 関連（任意）
+4. `npm run reprocess:stuck` で PROCESSING 止まりの投稿を再処理（本番は Worker 上で実行）
+
+Blueprint 適用後のサービス: `likepass-web` / `likepass-worker` / `likepass-db`
 
 ## ライセンス
 

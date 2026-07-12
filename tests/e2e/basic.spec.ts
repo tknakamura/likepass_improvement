@@ -64,3 +64,27 @@ test("discover page lists tags", async ({ page }) => {
   await page.goto("/discover");
   await expect(page.getByRole("heading", { name: "発見" })).toBeVisible();
 });
+
+test("upload page is accessible", async ({ page }) => {
+  const demoMode = process.env.DEMO_MODE === "true";
+  test.skip(!demoMode, "Requires DEMO_MODE=true");
+
+  await page.goto("/signin");
+  await page.getByRole("button", { name: /デモで/ }).click();
+  await page.waitForURL(/\/(evaluate|onboarding|ranking|me)/, { timeout: 15000 });
+
+  await page.goto("/upload");
+  await expect(page.getByRole("heading", { name: "写真を投稿" })).toBeVisible();
+});
+
+test("likes gallery page is accessible", async ({ page }) => {
+  const demoMode = process.env.DEMO_MODE === "true";
+  test.skip(!demoMode, "Requires DEMO_MODE=true");
+
+  await page.goto("/signin");
+  await page.getByRole("button", { name: /デモで/ }).click();
+  await page.waitForURL(/\/(evaluate|onboarding|ranking|me)/, { timeout: 15000 });
+
+  await page.goto("/me/likes");
+  await expect(page.getByRole("heading", { name: "LIKEした画像" })).toBeVisible();
+});

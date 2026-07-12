@@ -17,6 +17,7 @@
     "db:migrate:dev": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
     "worker": "tsx src/worker/index.ts",
+    "reprocess:stuck": "tsx scripts/reprocess-stuck.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {
