@@ -171,6 +171,10 @@ export function parseImageAnalysisResponse(raw: unknown): ImageAnalysisResult | 
   const resolvedTags =
     tags.length > 0 ? tags : [{ name: "photo", confidence: 0.6, category: "SUBJECT" as TagCategory }];
 
+  if (tags.length === 0) {
+    console.warn("[image-analysis] OpenAI returned zero tags; using fallback tag");
+  }
+
   const quality = parsed.data.quality ?? {};
   const safety = parsed.data.safety ?? {};
 
