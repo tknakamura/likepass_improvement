@@ -23,15 +23,21 @@ export default function UploadPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mimeType: file.type, fileSize: file.size }),
       });
+      if (!presign.ok) {
+        throw new Error("presign failed");
+      }
       const presignData = await presign.json();
 
       if (presignData.uploadUrl) {
         setStatus("画像をアップロード中...");
-        await fetch(presignData.uploadUrl, {
+        const uploadRes = await fetch(presignData.uploadUrl, {
           method: "PUT",
           body: file,
           headers: { "Content-Type": file.type },
         });
+        if (!uploadRes.ok) {
+          throw new Error("r2 upload failed");
+        }
       } else if (presignData.mockMode) {
         setStatus("画像を保存中...");
         const form = new FormData();
@@ -44,11 +50,14 @@ export default function UploadPage() {
       }
 
       setStatus("処理を開始しています...");
-      await fetch("/api/uploads/complete", {
+      const completeRes = await fetch("/api/uploads/complete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ contentId: presignData.contentId }),
       });
+      if (!completeRes.ok) {
+        throw new Error("complete failed");
+      }
 
       setStatus("完了！AIがタグを付与中です。");
       router.push(`/content/${presignData.contentId}`);
