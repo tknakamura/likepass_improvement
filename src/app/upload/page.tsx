@@ -4,6 +4,14 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { normalizeImageMimeType } from "@/lib/uploads/mime";
+
+const ERROR_MESSAGES: Record<string, string> = {
+  "presign failed": "アップロード準備に失敗しました。ログインし直してください。",
+  "upload failed": "画像の保存に失敗しました。",
+  "complete failed": "処理の開始に失敗しました。",
+  "unsupported type": "JPEG / PNG / WebP のみ対応しています。",
+};
 
 export default function UploadPage() {
   const router = useRouter();
@@ -14,6 +22,13 @@ export default function UploadPage() {
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault();
     if (!file) return;
+
+    const mimeType = normalizeImageMimeType(file);
+    if (!mimeType) {
+      setStatus(ERROR_MESSAGES["unsupported type"]);
+      return;
+    }
+
     setLoading(true);
     setStatus("アップロード準備中...");
 
@@ -21,32 +36,38 @@ export default function UploadPage() {
       const presign = await fetch("/api/uploads/presign", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mimeType: file.type, fileSize: file.size }),
+        body: JSON.stringify({
+          mimeType,
+          fileSize: file.size,
+          fileName: file.name,
+        }),
       });
       if (!presign.ok) {
         throw new Error("presign failed");
       }
       const presignData = await presign.json();
 
-      if (presignData.uploadUrl) {
+      if (presignData.serverUpload || presignData.mockMode) {
         setStatus("画像をアップロード中...");
-        const uploadRes = await fetch(presignData.uploadUrl, {
-          method: "PUT",
-          body: file,
-          headers: { "Content-Type": file.type },
-        });
-        if (!uploadRes.ok) {
-          throw new Error("r2 upload failed");
-        }
-      } else if (presignData.mockMode) {
-        setStatus("画像を保存中...");
         const form = new FormData();
         form.append("contentId", presignData.contentId);
         form.append("file", file);
         const direct = await fetch("/api/uploads/direct", { method: "POST", body: form });
         if (!direct.ok) {
-          throw new Error("direct upload failed");
+          throw new Error("upload failed");
         }
+      } else if (presignData.uploadUrl) {
+        setStatus("画像をアップロード中...");
+        const uploadRes = await fetch(presignData.uploadUrl, {
+          method: "PUT",
+          body: file,
+          headers: { "Content-Type": mimeType },
+        });
+        if (!uploadRes.ok) {
+          throw new Error("upload failed");
+        }
+      } else {
+        throw new Error("upload failed");
       }
 
       setStatus("処理を開始しています...");
@@ -61,8 +82,9 @@ export default function UploadPage() {
 
       setStatus("完了！AIがタグを付与中です。");
       router.push(`/content/${presignData.contentId}`);
-    } catch {
-      setStatus("アップロードに失敗しました");
+    } catch (err) {
+      const key = err instanceof Error ? err.message : "";
+      setStatus(ERROR_MESSAGES[key] ?? "アップロードに失敗しました");
     } finally {
       setLoading(false);
     }
@@ -79,7 +101,7 @@ export default function UploadPage() {
           <form onSubmit={handleUpload} className="space-y-4">
             <input
               type="file"
-              accept="image/jpeg,image/png,image/webp"
+              accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
               required
             />
