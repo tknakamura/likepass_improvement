@@ -19,11 +19,13 @@ export default function OnboardingPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [tagsLoading, setTagsLoading] = useState(true);
 
   useEffect(() => {
     fetch("/api/tags")
       .then((r) => r.json())
-      .then((data) => setTags(data.tags ?? []));
+      .then((data) => setTags(data.tags ?? []))
+      .finally(() => setTagsLoading(false));
   }, []);
 
   function toggleTag(id: string) {
@@ -88,26 +90,34 @@ export default function OnboardingPage() {
           )}
           {step === 2 && (
             <>
-              <div className="flex flex-wrap gap-2">
-                {tags.map((tag) => (
-                  <button
-                    key={tag.id}
-                    type="button"
-                    onClick={() => toggleTag(tag.id)}
-                    className={`px-3 py-1 rounded-full text-sm border ${
-                      selected.has(tag.id)
-                        ? "bg-[var(--primary)] text-[var(--primary-foreground)] border-transparent"
-                        : "border-[var(--border)]"
-                    }`}
-                  >
-                    #{tag.slug}
-                  </button>
-                ))}
-              </div>
+              {tagsLoading ? (
+                <p className="text-sm text-[var(--muted-foreground)]">タグを読み込み中...</p>
+              ) : tags.length === 0 ? (
+                <p className="text-sm text-[var(--muted-foreground)]">
+                  タグの準備中です。しばらく待ってからページを再読み込みしてください。
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {tags.map((tag) => (
+                    <button
+                      key={tag.id}
+                      type="button"
+                      onClick={() => toggleTag(tag.id)}
+                      className={`px-3 py-1 rounded-full text-sm border ${
+                        selected.has(tag.id)
+                          ? "bg-[var(--primary)] text-[var(--primary-foreground)] border-transparent"
+                          : "border-[var(--border)]"
+                      }`}
+                    >
+                      #{tag.slug}
+                    </button>
+                  ))}
+                </div>
+              )}
               <p className="text-sm text-[var(--muted-foreground)]">{selected.size}/10 選択中（最低3個）</p>
               <Button
                 className="w-full"
-                disabled={selected.size < 3 || loading}
+                disabled={tagsLoading || tags.length === 0 || selected.size < 3 || loading}
                 onClick={completeOnboarding}
               >
                 {loading ? "完了中..." : "評価を始める"}
