@@ -19,6 +19,6 @@ export function getContentStatusHint(status: ContentStatus): string | null {
   if (status === "DORMANT") return "現在、ランキング対象外";
   if (status === "EXPLORING") return "評価を集めています";
   if (status === "PROCESSING" || status === "UPLOADING") return "公開まで少々お待ちください";
-  if (status === "REVIEW_REQUIRED") return "管理者の確認待ち";
+  if (status === "REVIEW_REQUIRED") return "公開準備中（再処理待ち）";
   return null;
 }

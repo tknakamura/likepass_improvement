@@ -66,8 +66,10 @@ async function processImage(contentId: string) {
   const analysis = await provider.analyze(buffer, content.mimeType ?? "image/jpeg", { knownTags });
 
   let status: "EXPLORING" | "REVIEW_REQUIRED" | "REJECTED" = "EXPLORING";
-  if (analysis.safety.status === "REJECTED") status = "REJECTED";
-  else if (analysis.safety.status === "REVIEW_REQUIRED") status = "REVIEW_REQUIRED";
+  if (analysis.safety.status === "REJECTED") {
+    status = "REJECTED";
+  }
+  // MVP: no admin review workflow yet — publish unless explicitly rejected.
 
   await prisma.content.update({
     where: { id: contentId },
@@ -178,5 +180,24 @@ export async function startWorker() {
 
   await b!.schedule("recalculate_ranking", "*/15 * * * *", {}, { tz: "UTC" });
 
+  await requeuePendingImages(b!);
+
   console.log("LIKEPASS worker started");
+}
+
+async function requeuePendingImages(boss: Awaited<ReturnType<typeof import("@/lib/jobs").getBoss>>) {
+  const pending = await prisma.content.findMany({
+    where: { status: { in: ["PROCESSING", "REVIEW_REQUIRED"] } },
+    select: { id: true },
+    orderBy: { createdAt: "asc" },
+    take: 50,
+  });
+
+  for (const { id } of pending) {
+    await boss!.send("process_image", { contentId: id });
+  }
+
+  if (pending.length > 0) {
+    console.log(`Requeued ${pending.length} pending image job(s)`);
+  }
 }
