@@ -1,10 +1,11 @@
 import sharp from "sharp";
 import { prisma } from "@/lib/db";
 import { getImageAnalysisProvider } from "@/lib/ai/image-analysis";
-import { normalizeTagSlug } from "@/lib/ai/image-analysis-schema";
+import { MAX_AI_TAGS, normalizeTagSlug } from "@/lib/ai/image-analysis-schema";
 import { getObjectBuffer, putObject } from "@/lib/r2";
 import { readLocalImage, saveLocalImage, isR2Configured } from "@/lib/local-images";
 import { recalculateTagRanking } from "@/server/services/content/aggregates";
+import { PROCESS_IMAGE_JOB_OPTIONS } from "@/lib/jobs";
 import type { TagCategory } from "@prisma/client";
 
 const CATEGORY_MAP: Record<string, TagCategory> = {
@@ -14,6 +15,18 @@ const CATEGORY_MAP: Record<string, TagCategory> = {
   ATTRIBUTE: "ATTRIBUTE",
   LOCATION: "LOCATION",
 };
+
+async function markContentReviewRequired(contentId: string, reason: string) {
+  await prisma.content.update({
+    where: { id: contentId },
+    data: {
+      status: "REVIEW_REQUIRED",
+      publishedAt: null,
+      aiSafetyStatus: "REVIEW_REQUIRED",
+    },
+  });
+  console.error(`[process_image] ${contentId} held as REVIEW_REQUIRED (${reason})`);
+}
 
 async function processImage(contentId: string) {
   const content = await prisma.content.findUnique({ where: { id: contentId } });
@@ -83,8 +96,9 @@ async function processImage(contentId: string) {
   let status: "EXPLORING" | "REVIEW_REQUIRED" | "REJECTED" = "EXPLORING";
   if (analysis.safety.status === "REJECTED") {
     status = "REJECTED";
+  } else if (analysis.safety.status === "REVIEW_REQUIRED") {
+    status = "REVIEW_REQUIRED";
   }
-  // MVP: no admin review workflow yet — publish unless explicitly rejected.
 
   await prisma.content.update({
     where: { id: contentId },
@@ -102,7 +116,12 @@ async function processImage(contentId: string) {
     },
   });
 
-  for (const tag of analysis.tags.slice(0, 5)) {
+  // Replace prior AI tags so reprocessing does not leave stale generic tags.
+  await prisma.contentTag.deleteMany({
+    where: { contentId, source: "AI" },
+  });
+
+  for (const tag of analysis.tags.slice(0, MAX_AI_TAGS)) {
     const slug = normalizeTagSlug(tag.name);
     if (!slug) continue;
     const dbTag = await prisma.tag.upsert({
@@ -125,7 +144,11 @@ async function processImage(contentId: string) {
         confidence: tag.confidence,
         status: status === "EXPLORING" ? "PENDING" : "REMOVED",
       },
-      update: {},
+      update: {
+        source: "AI",
+        confidence: tag.confidence,
+        status: status === "EXPLORING" ? "PENDING" : "REMOVED",
+      },
     });
   }
 
@@ -181,17 +204,26 @@ export async function startWorker() {
   }
 
   const b = await boss;
-  await b!.work("process_image", async (jobs) => {
-    const job = Array.isArray(jobs) ? jobs[0] : jobs;
-    if (!job) return;
-    const contentId = (job.data as { contentId: string }).contentId;
-    try {
-      await processImage(contentId);
-    } catch (error) {
-      console.error(`[process_image] ${contentId} failed`, error);
-      throw error;
-    }
-  });
+  await b!.work(
+    "process_image",
+    { includeMetadata: true },
+    async (jobs) => {
+      const job = Array.isArray(jobs) ? jobs[0] : jobs;
+      if (!job) return;
+      const contentId = (job.data as { contentId: string }).contentId;
+      try {
+        await processImage(contentId);
+      } catch (error) {
+        console.error(`[process_image] ${contentId} failed`, error);
+        // pg-boss increments retryCount after this failure; when equal to limit, no further retries.
+        if (job.retryCount >= job.retryLimit) {
+          const reason = error instanceof Error ? error.message : "unknown_error";
+          await markContentReviewRequired(contentId, reason);
+        }
+        throw error;
+      }
+    },
+  );
 
   await b!.work("recalculate_ranking", async (jobs) => {
     const job = Array.isArray(jobs) ? jobs[0] : jobs;
@@ -209,15 +241,16 @@ export async function startWorker() {
 }
 
 async function requeuePendingImages(boss: Awaited<ReturnType<typeof import("@/lib/jobs").getBoss>>) {
+  // Only PROCESSING — REVIEW_REQUIRED requires manual reprocess to avoid infinite loops.
   const pending = await prisma.content.findMany({
-    where: { status: { in: ["PROCESSING", "REVIEW_REQUIRED"] } },
+    where: { status: "PROCESSING" },
     select: { id: true },
     orderBy: { createdAt: "asc" },
     take: 50,
   });
 
   for (const { id } of pending) {
-    await boss!.send("process_image", { contentId: id });
+    await boss!.send("process_image", { contentId: id }, PROCESS_IMAGE_JOB_OPTIONS);
   }
 
   if (pending.length > 0) {

@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   clamp01,
+  isGenericTagSlug,
+  MAX_AI_TAGS,
   normalizeTagSlug,
   parseImageAnalysisResponse,
   parseMetric,
@@ -16,6 +18,16 @@ describe("normalizeTagSlug", () => {
     expect(normalizeTagSlug("nighttime")).toBe("night");
     expect(normalizeTagSlug("puppy")).toBe("dog");
     expect(normalizeTagSlug("urban")).toBe("city");
+  });
+});
+
+describe("isGenericTagSlug", () => {
+  it("rejects media-type generic slugs", () => {
+    expect(isGenericTagSlug("photo")).toBe(true);
+    expect(isGenericTagSlug("image")).toBe(true);
+    expect(isGenericTagSlug("picture")).toBe(true);
+    expect(isGenericTagSlug("photography")).toBe(true);
+    expect(isGenericTagSlug("street")).toBe(false);
   });
 });
 
@@ -56,7 +68,33 @@ describe("parseImageAnalysisResponse", () => {
     ).toBeNull();
   });
 
-  it("limits tags to five", () => {
+  it("returns null when only generic media tags remain", () => {
+    expect(
+      parseImageAnalysisResponse({
+        tags: [
+          { name: "photo", confidence: 0.9, category: "SUBJECT" },
+          { name: "image", confidence: 0.8, category: "SUBJECT" },
+        ],
+        safety: { status: "SAFE", reasons: [] },
+      }),
+    ).toBeNull();
+  });
+
+  it("filters out generic tags while keeping content tags", () => {
+    const result = parseImageAnalysisResponse({
+      tags: [
+        { name: "photo", confidence: 0.99, category: "SUBJECT" },
+        { name: "street", confidence: 0.9, category: "SCENE" },
+        { name: "night", confidence: 0.88, category: "ATTRIBUTE" },
+      ],
+      safety: { status: "SAFE", reasons: [] },
+    });
+
+    expect(result?.tags).toHaveLength(2);
+    expect(result?.tags.map((t) => t.name)).toEqual(["street", "night"]);
+  });
+
+  it(`limits tags to ${MAX_AI_TAGS}`, () => {
     const result = parseImageAnalysisResponse({
       tags: [
         { name: "street", confidence: 0.9, category: "SCENE" },
@@ -69,7 +107,7 @@ describe("parseImageAnalysisResponse", () => {
       safety: { status: "SAFE", reasons: [] },
     });
 
-    expect(result?.tags).toHaveLength(5);
+    expect(result?.tags).toHaveLength(MAX_AI_TAGS);
   });
 });
 

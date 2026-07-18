@@ -2,6 +2,12 @@ import PgBoss from "pg-boss";
 
 export const JOB_QUEUE_NAMES = ["process_image", "recalculate_ranking"] as const;
 
+export const PROCESS_IMAGE_JOB_OPTIONS: PgBoss.SendOptions = {
+  retryLimit: 3,
+  retryBackoff: true,
+  retryDelay: 30,
+};
+
 let boss: PgBoss | null = null;
 
 function getPgBossOptions(): PgBoss.ConstructorOptions {
@@ -52,5 +58,10 @@ export async function enqueueJob(name: string, data: Record<string, unknown>) {
     await processJobInline(name, data);
     return;
   }
-  await b.send(name, data);
+
+  if (name === "process_image") {
+    await b.send(name, data, PROCESS_IMAGE_JOB_OPTIONS);
+  } else {
+    await b.send(name, data);
+  }
 }
