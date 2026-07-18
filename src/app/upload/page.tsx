@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { NpcJudgesIntro } from "@/components/npc/npc-judges-intro";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { normalizeImageMimeType } from "@/lib/uploads/mime";
@@ -80,7 +81,7 @@ export default function UploadPage() {
         throw new Error("complete failed");
       }
 
-      setStatus("完了！AIタグ付けとNPC審査を開始します。");
+      setStatus("完了！世界10カ国の審査員があなたの写真を見に行きます。");
       router.push(`/content/${presignData.contentId}`);
     } catch (err) {
       const key = err instanceof Error ? err.message : "";
@@ -91,11 +92,13 @@ export default function UploadPage() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-16 max-w-md">
+    <div className="container mx-auto max-w-xl px-4 py-16">
       <Card>
         <CardHeader>
           <CardTitle>写真を投稿</CardTitle>
-          <CardDescription>JPEG / PNG / WebP、最大15MB、1投稿1画像</CardDescription>
+          <CardDescription>
+            JPEG / PNG / WebP、最大15MB、1投稿1画像。投稿後すぐに世界の審査員が見てくれます。
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleUpload} className="space-y-4">
@@ -112,6 +115,7 @@ export default function UploadPage() {
           </form>
         </CardContent>
       </Card>
+      <NpcJudgesIntro />
     </div>
   );
 }
