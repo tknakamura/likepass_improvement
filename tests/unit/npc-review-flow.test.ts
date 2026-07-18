@@ -153,7 +153,48 @@ describe("runNpcReview", () => {
     expect(transaction).not.toHaveBeenCalled();
   });
 
-  it("does not publish when status is not NPC_REVIEWING", async () => {
+  it("backfills tag-scoped NPC votes for EXPLORING content missing them", async () => {
+    contentFindUnique
+      .mockResolvedValueOnce({
+        id: "c1",
+        status: "EXPLORING",
+        aiSafetyStatus: "SAFE",
+        publishedAt: new Date(),
+        mediumObjectKey: "processed/c1/medium.webp",
+        largeObjectKey: null,
+        originalObjectKey: null,
+        mimeType: "image/jpeg",
+        contentTags: [
+          { tagId: "tag-child", status: "PENDING", tag: { slug: "child", displayName: "子ども" } },
+        ],
+      })
+      .mockResolvedValueOnce({
+        id: "c1",
+        mediumObjectKey: "processed/c1/medium.webp",
+        largeObjectKey: null,
+        originalObjectKey: null,
+        mimeType: "image/jpeg",
+      });
+    npcCount.mockResolvedValueOnce(0);
+    transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+      const tx = {
+        npcEvaluation: {
+          upsert: npcUpsert,
+          count: async () => NPC_JUDGE_COUNT,
+        },
+        content: { update: contentUpdate },
+        contentTag: { updateMany: contentTagUpdateMany },
+      };
+      return fn(tx);
+    });
+
+    const { runNpcReview } = await import("@/server/services/npc/review");
+    await runNpcReview("c1");
+
+    expect(npcUpsert).toHaveBeenCalledTimes(NPC_JUDGE_COUNT);
+  });
+
+  it("does not run for PROCESSING content", async () => {
     contentFindUnique.mockResolvedValueOnce({
       id: "c1",
       status: "PROCESSING",

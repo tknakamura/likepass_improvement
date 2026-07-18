@@ -74,14 +74,12 @@ export async function runNpcReview(contentId: string): Promise<void> {
     where: { contentId, tagId: { not: null } },
   });
 
-  if (
-    taggedEvalCount >= expectedCount &&
-    ["EXPLORING", "ACTIVE", "DORMANT"].includes(content.status)
-  ) {
+  if (taggedEvalCount >= expectedCount) {
     return;
   }
 
-  if (content.status !== "NPC_REVIEWING") {
+  // Allow backfill for already-published posts that lack tag-scoped NPC votes.
+  if (!["NPC_REVIEWING", "EXPLORING", "ACTIVE"].includes(content.status)) {
     return;
   }
 
