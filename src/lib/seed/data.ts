@@ -13,6 +13,10 @@ export const SEED_TAGS: { slug: string; displayName: string; category: TagCatego
   { slug: "architecture", displayName: "Architecture", category: "SUBJECT" },
   { slug: "ramen", displayName: "Ramen", category: "SUBJECT" },
   { slug: "mountain", displayName: "Mountain", category: "SCENE" },
+  { slug: "portrait", displayName: "Portrait", category: "SUBJECT" },
+  { slug: "people", displayName: "People", category: "SUBJECT" },
+  { slug: "child", displayName: "Child", category: "SUBJECT" },
+  { slug: "family", displayName: "Family", category: "SUBJECT" },
 ];
 
 export const DEFAULT_CONFIG = {

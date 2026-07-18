@@ -237,8 +237,25 @@ export async function startWorker() {
   await b!.schedule("recalculate_ranking", "*/15 * * * *", {}, { tz: "UTC" });
 
   await requeuePendingImages(b!);
+  await requeueEnvContentIds(b!);
 
   console.log("LIKEPASS worker started");
+}
+
+function parseReprocessContentIds(raw: string | undefined): string[] {
+  if (!raw?.trim()) return [];
+  return [...new Set(raw.split(",").map((id) => id.trim()).filter(Boolean))];
+}
+
+async function requeueEnvContentIds(boss: PgBoss) {
+  const ids = parseReprocessContentIds(process.env.REPROCESS_CONTENT_IDS);
+  if (ids.length === 0) return;
+
+  for (const id of ids) {
+    await boss.send("process_image", { contentId: id }, PROCESS_IMAGE_JOB_OPTIONS);
+  }
+
+  console.log(`Requeued ${ids.length} content(s) from REPROCESS_CONTENT_IDS`);
 }
 
 async function findGenericTaggedContentIds(limit = 50): Promise<string[]> {
