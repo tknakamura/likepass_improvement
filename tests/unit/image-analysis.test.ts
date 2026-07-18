@@ -19,6 +19,21 @@ describe("normalizeTagSlug", () => {
     expect(normalizeTagSlug("puppy")).toBe("dog");
     expect(normalizeTagSlug("urban")).toBe("city");
   });
+
+  it("normalizes people / portrait synonyms", () => {
+    expect(normalizeTagSlug("toddler")).toBe("child");
+    expect(normalizeTagSlug("kids")).toBe("child");
+    expect(normalizeTagSlug("newborn")).toBe("baby");
+    expect(normalizeTagSlug("selfie")).toBe("portrait");
+    expect(normalizeTagSlug("persons")).toBe("people");
+  });
+
+  it("does not over-normalize domain-specific words", () => {
+    expect(normalizeTagSlug("landscape")).toBe("landscape");
+    expect(normalizeTagSlug("food")).toBe("food");
+    expect(normalizeTagSlug("building")).toBe("building");
+    expect(normalizeTagSlug("hiking")).toBe("hiking");
+  });
 });
 
 describe("isGenericTagSlug", () => {
@@ -92,6 +107,20 @@ describe("parseImageAnalysisResponse", () => {
 
     expect(result?.tags).toHaveLength(2);
     expect(result?.tags.map((t) => t.name)).toEqual(["street", "night"]);
+  });
+
+  it("keeps people subject tags such as child and portrait", () => {
+    const result = parseImageAnalysisResponse({
+      tags: [
+        { name: "toddler", confidence: 0.95, category: "SUBJECT" },
+        { name: "selfie", confidence: 0.9, category: "SUBJECT" },
+        { name: "interior", confidence: 0.7, category: "SCENE" },
+      ],
+      safety: { status: "SAFE", reasons: [] },
+    });
+
+    expect(result?.tags.map((t) => t.name)).toEqual(["child", "portrait", "interior"]);
+    expect(result?.tags[0]?.category).toBe("SUBJECT");
   });
 
   it(`limits tags to ${MAX_AI_TAGS}`, () => {
