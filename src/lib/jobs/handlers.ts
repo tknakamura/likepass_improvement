@@ -1,12 +1,13 @@
 import sharp from "sharp";
 import { prisma } from "@/lib/db";
 import { getImageAnalysisProvider } from "@/lib/ai/image-analysis";
-import { MAX_AI_TAGS, normalizeTagSlug } from "@/lib/ai/image-analysis-schema";
+import { GENERIC_TAG_SLUGS, MAX_AI_TAGS, normalizeTagSlug } from "@/lib/ai/image-analysis-schema";
 import { getObjectBuffer, putObject } from "@/lib/r2";
 import { readLocalImage, saveLocalImage, isR2Configured } from "@/lib/local-images";
 import { recalculateTagRanking } from "@/server/services/content/aggregates";
 import { PROCESS_IMAGE_JOB_OPTIONS } from "@/lib/jobs";
 import type { TagCategory } from "@prisma/client";
+import type PgBoss from "pg-boss";
 
 const CATEGORY_MAP: Record<string, TagCategory> = {
   SUBJECT: "SUBJECT",
@@ -240,7 +241,33 @@ export async function startWorker() {
   console.log("LIKEPASS worker started");
 }
 
-async function requeuePendingImages(boss: Awaited<ReturnType<typeof import("@/lib/jobs").getBoss>>) {
+async function findGenericTaggedContentIds(limit = 50): Promise<string[]> {
+  const candidates = await prisma.content.findMany({
+    where: {
+      status: { in: ["EXPLORING", "ACTIVE"] },
+      contentTags: { some: { source: "AI" } },
+    },
+    select: {
+      id: true,
+      contentTags: {
+        where: { source: "AI" },
+        select: { tag: { select: { slug: true } } },
+      },
+    },
+    orderBy: { createdAt: "asc" },
+    take: 100,
+  });
+
+  return candidates
+    .filter((content) => {
+      const slugs = content.contentTags.map((ct) => ct.tag.slug);
+      return slugs.length > 0 && slugs.every((slug) => GENERIC_TAG_SLUGS.has(slug));
+    })
+    .slice(0, limit)
+    .map((content) => content.id);
+}
+
+async function requeuePendingImages(boss: PgBoss) {
   // Only PROCESSING — REVIEW_REQUIRED requires manual reprocess to avoid infinite loops.
   const pending = await prisma.content.findMany({
     where: { status: "PROCESSING" },
@@ -249,11 +276,17 @@ async function requeuePendingImages(boss: Awaited<ReturnType<typeof import("@/li
     take: 50,
   });
 
-  for (const { id } of pending) {
-    await boss!.send("process_image", { contentId: id }, PROCESS_IMAGE_JOB_OPTIONS);
+  const genericTaggedIds = await findGenericTaggedContentIds(50);
+  const ids = [...new Set([...pending.map((p) => p.id), ...genericTaggedIds])];
+
+  for (const id of ids) {
+    await boss.send("process_image", { contentId: id }, PROCESS_IMAGE_JOB_OPTIONS);
   }
 
   if (pending.length > 0) {
     console.log(`Requeued ${pending.length} pending image job(s)`);
+  }
+  if (genericTaggedIds.length > 0) {
+    console.log(`Requeued ${genericTaggedIds.length} generic-AI-tagged content(s) for retagging`);
   }
 }
