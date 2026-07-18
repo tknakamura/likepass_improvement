@@ -32,7 +32,17 @@ export function isExcludedFromQueue(
 ): boolean {
   if (content.userId === context.userId) return true;
   if (context.votedContentIds.has(content.id)) return true;
-  if (["DORMANT", "REJECTED", "DELETED", "UPLOADING", "PROCESSING", "REVIEW_REQUIRED"].includes(content.status)) {
+  if (
+    [
+      "DORMANT",
+      "REJECTED",
+      "DELETED",
+      "UPLOADING",
+      "PROCESSING",
+      "NPC_REVIEWING",
+      "REVIEW_REQUIRED",
+    ].includes(content.status)
+  ) {
     return true;
   }
 

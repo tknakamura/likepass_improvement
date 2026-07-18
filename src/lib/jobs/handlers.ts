@@ -5,7 +5,8 @@ import { GENERIC_TAG_SLUGS, MAX_AI_TAGS, normalizeTagSlug } from "@/lib/ai/image
 import { getObjectBuffer, putObject } from "@/lib/r2";
 import { readLocalImage, saveLocalImage, isR2Configured } from "@/lib/local-images";
 import { recalculateTagRanking } from "@/server/services/content/aggregates";
-import { PROCESS_IMAGE_JOB_OPTIONS } from "@/lib/jobs";
+import { markNpcReviewFailed, runNpcReview } from "@/server/services/npc/review";
+import { NPC_REVIEW_JOB_OPTIONS, PROCESS_IMAGE_JOB_OPTIONS } from "@/lib/jobs";
 import type { TagCategory } from "@prisma/client";
 import type PgBoss from "pg-boss";
 
@@ -48,7 +49,7 @@ async function processImage(contentId: string) {
         imageSource = "local";
       } else {
         console.warn(
-          `[process_image] Original not found (${content.originalObjectKey}); using placeholder`
+          `[process_image] Original not found (${content.originalObjectKey}); using placeholder`,
         );
         buffer = await generatePlaceholder();
         imageSource = "placeholder";
@@ -60,9 +61,21 @@ async function processImage(contentId: string) {
   }
 
   const metadata = await sharp(buffer).metadata();
-  const large = await sharp(buffer).rotate().resize(1920, 1920, { fit: "inside", withoutEnlargement: true }).webp({ quality: 85 }).toBuffer();
-  const medium = await sharp(buffer).rotate().resize(800, 800, { fit: "inside", withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
-  const thumbnail = await sharp(buffer).rotate().resize(200, 200, { fit: "cover" }).webp({ quality: 75 }).toBuffer();
+  const large = await sharp(buffer)
+    .rotate()
+    .resize(1920, 1920, { fit: "inside", withoutEnlargement: true })
+    .webp({ quality: 85 })
+    .toBuffer();
+  const medium = await sharp(buffer)
+    .rotate()
+    .resize(800, 800, { fit: "inside", withoutEnlargement: true })
+    .webp({ quality: 80 })
+    .toBuffer();
+  const thumbnail = await sharp(buffer)
+    .rotate()
+    .resize(200, 200, { fit: "cover" })
+    .webp({ quality: 75 })
+    .toBuffer();
 
   const largeKey = `processed/${contentId}/large.webp`;
   const mediumKey = `processed/${contentId}/medium.webp`;
@@ -94,12 +107,19 @@ async function processImage(contentId: string) {
   const provider = getImageAnalysisProvider();
   const analysis = await provider.analyze(buffer, content.mimeType ?? "image/jpeg", { knownTags });
 
-  let status: "EXPLORING" | "REVIEW_REQUIRED" | "REJECTED" = "EXPLORING";
+  const alreadyPublished = ["EXPLORING", "ACTIVE", "DORMANT"].includes(content.status);
+  let status: "NPC_REVIEWING" | "REVIEW_REQUIRED" | "REJECTED" | "EXPLORING" | "ACTIVE" | "DORMANT" =
+    "NPC_REVIEWING";
   if (analysis.safety.status === "REJECTED") {
     status = "REJECTED";
   } else if (analysis.safety.status === "REVIEW_REQUIRED") {
     status = "REVIEW_REQUIRED";
+  } else if (alreadyPublished) {
+    // Retag / reprocess must not unpublish already-live content (including legacy posts).
+    status = content.status as "EXPLORING" | "ACTIVE" | "DORMANT";
   }
+
+  const needsNpcReview = status === "NPC_REVIEWING";
 
   await prisma.content.update({
     where: { id: contentId },
@@ -113,7 +133,9 @@ async function processImage(contentId: string) {
       aiQualityScore: analysis.quality.aesthetic,
       aiSafetyStatus: analysis.safety.status,
       status,
-      publishedAt: status === "EXPLORING" ? new Date() : null,
+      publishedAt: needsNpcReview
+        ? null
+        : content.publishedAt ?? (alreadyPublished ? new Date() : null),
     },
   });
 
@@ -122,6 +144,7 @@ async function processImage(contentId: string) {
     where: { contentId, source: "AI" },
   });
 
+  const tagReady = status !== "REJECTED" && status !== "REVIEW_REQUIRED";
   for (const tag of analysis.tags.slice(0, MAX_AI_TAGS)) {
     const slug = normalizeTagSlug(tag.name);
     if (!slug) continue;
@@ -143,17 +166,20 @@ async function processImage(contentId: string) {
         tagId: dbTag.id,
         source: "AI",
         confidence: tag.confidence,
-        status: status === "EXPLORING" ? "PENDING" : "REMOVED",
+        status: tagReady ? "PENDING" : "REMOVED",
       },
       update: {
         source: "AI",
         confidence: tag.confidence,
-        status: status === "EXPLORING" ? "PENDING" : "REMOVED",
+        status: tagReady ? "PENDING" : "REMOVED",
       },
     });
   }
 
-  if (status === "EXPLORING") {
+  if (needsNpcReview) {
+    const { enqueueJob } = await import("@/lib/jobs");
+    await enqueueJob("npc_review_image", { contentId });
+  } else if (alreadyPublished) {
     const tags = await prisma.contentTag.findMany({ where: { contentId } });
     for (const ct of tags) {
       await recalculateTagRanking(ct.tagId);
@@ -188,6 +214,9 @@ export async function processJobInline(name: string, data: Record<string, unknow
     case "process_image":
       await processImage(data.contentId as string);
       break;
+    case "npc_review_image":
+      await runNpcReview(data.contentId as string);
+      break;
     case "recalculate_ranking":
       if (data.tagId) await recalculateTagRanking(data.tagId as string);
       else await recalculateAllRankings();
@@ -216,10 +245,29 @@ export async function startWorker() {
         await processImage(contentId);
       } catch (error) {
         console.error(`[process_image] ${contentId} failed`, error);
-        // pg-boss increments retryCount after this failure; when equal to limit, no further retries.
         if (job.retryCount >= job.retryLimit) {
           const reason = error instanceof Error ? error.message : "unknown_error";
           await markContentReviewRequired(contentId, reason);
+        }
+        throw error;
+      }
+    },
+  );
+
+  await b!.work(
+    "npc_review_image",
+    { includeMetadata: true },
+    async (jobs) => {
+      const job = Array.isArray(jobs) ? jobs[0] : jobs;
+      if (!job) return;
+      const contentId = (job.data as { contentId: string }).contentId;
+      try {
+        await runNpcReview(contentId);
+      } catch (error) {
+        console.error(`[npc_review_image] ${contentId} failed`, error);
+        if (job.retryCount >= job.retryLimit) {
+          const reason = error instanceof Error ? error.message : "unknown_error";
+          await markNpcReviewFailed(contentId, reason);
         }
         throw error;
       }
@@ -237,6 +285,7 @@ export async function startWorker() {
   await b!.schedule("recalculate_ranking", "*/15 * * * *", {}, { tz: "UTC" });
 
   await requeuePendingImages(b!);
+  await requeuePendingNpcReviews(b!);
   await requeueEnvContentIds(b!);
 
   console.log("LIKEPASS worker started");
@@ -305,5 +354,22 @@ async function requeuePendingImages(boss: PgBoss) {
   }
   if (genericTaggedIds.length > 0) {
     console.log(`Requeued ${genericTaggedIds.length} generic-AI-tagged content(s) for retagging`);
+  }
+}
+
+async function requeuePendingNpcReviews(boss: PgBoss) {
+  const pending = await prisma.content.findMany({
+    where: { status: "NPC_REVIEWING", aiSafetyStatus: "SAFE" },
+    select: { id: true },
+    orderBy: { createdAt: "asc" },
+    take: 50,
+  });
+
+  for (const { id } of pending) {
+    await boss.send("npc_review_image", { contentId: id }, NPC_REVIEW_JOB_OPTIONS);
+  }
+
+  if (pending.length > 0) {
+    console.log(`Requeued ${pending.length} pending NPC review job(s)`);
   }
 }

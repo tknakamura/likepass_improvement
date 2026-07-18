@@ -7,86 +7,152 @@ import {
   wilsonLowerBound,
   meetsRankingEligibility,
 } from "@/server/services/ranking/scoring";
-import type { ContentStatus, ContentTagStatus } from "@prisma/client";
+import type { ContentStatus, ContentTagStatus, Prisma } from "@prisma/client";
 
-export async function updateVoteAggregates(contentId: string, oldValue?: "LIKE" | "PASS", newValue?: "LIKE" | "PASS") {
-  const configs = await getAppConfigs();
-  const content = await prisma.content.findUnique({ where: { id: contentId } });
-  if (!content) return;
+type TxClient = Prisma.TransactionClient;
 
-  let likeCount = content.likeCount;
-  let passCount = content.passCount;
+async function countVotesFromSources(contentId: string, tx: TxClient | typeof prisma = prisma) {
+  const [humanLikes, humanPasses, npcLikes, npcPasses] = await Promise.all([
+    tx.vote.count({ where: { contentId, value: "LIKE" } }),
+    tx.vote.count({ where: { contentId, value: "PASS" } }),
+    tx.npcEvaluation.count({ where: { contentId, value: "LIKE" } }),
+    tx.npcEvaluation.count({ where: { contentId, value: "PASS" } }),
+  ]);
 
-  if (oldValue === "LIKE") likeCount--;
-  if (oldValue === "PASS") passCount--;
-  if (newValue === "LIKE") likeCount++;
-  if (newValue === "PASS") passCount++;
-
-  likeCount = Math.max(0, likeCount);
-  passCount = Math.max(0, passCount);
-  const voteCount = likeCount + passCount;
-  const likeRate = computeLikeRate(likeCount, passCount);
-  const wilsonLower = wilsonLowerBound(likeCount, passCount);
-
-  let status: ContentStatus = content.status;
-  if (shouldBecomeDormant(likeCount, passCount, configs.dormant) && ["EXPLORING", "ACTIVE"].includes(content.status)) {
-    status = "DORMANT";
-  } else if (
-    content.status === "EXPLORING" &&
-    meetsRankingEligibility(likeCount, passCount, configs.ranking.minVotes, configs.ranking.minLikes)
-  ) {
-    status = "ACTIVE";
-  }
-
-  await prisma.content.update({
-    where: { id: contentId },
-    data: { likeCount, passCount, voteCount, likeRate, wilsonLower, status },
-  });
-
-  await updateContentTagAggregates(contentId);
-  await evaluateLifecycle(contentId);
+  const likeCount = humanLikes + npcLikes;
+  const passCount = humanPasses + npcPasses;
+  return {
+    likeCount,
+    passCount,
+    voteCount: likeCount + passCount,
+    humanLikeCount: humanLikes,
+    humanPassCount: humanPasses,
+    npcLikeCount: npcLikes,
+    npcPassCount: npcPasses,
+  };
 }
 
-async function updateContentTagAggregates(contentId: string) {
-  const configs = await getAppConfigs();
-  const content = await prisma.content.findUnique({ where: { id: contentId } });
-  if (!content) return;
+function resolveLifecycleStatus(
+  currentStatus: ContentStatus,
+  likeCount: number,
+  passCount: number,
+  dormant: Awaited<ReturnType<typeof getAppConfigs>>["dormant"],
+  ranking: Awaited<ReturnType<typeof getAppConfigs>>["ranking"],
+): ContentStatus {
+  // Do not advance lifecycle while still in pre-publish pipeline.
+  if (
+    currentStatus === "UPLOADING" ||
+    currentStatus === "PROCESSING" ||
+    currentStatus === "NPC_REVIEWING" ||
+    currentStatus === "REVIEW_REQUIRED" ||
+    currentStatus === "REJECTED" ||
+    currentStatus === "DELETED"
+  ) {
+    return currentStatus;
+  }
 
-  const contentTags = await prisma.contentTag.findMany({ where: { contentId } });
-  for (const ct of contentTags) {
-    const rankingScore = computeRankingScore({
-      likeCount: content.likeCount,
-      passCount: content.passCount,
-      publishedAt: content.publishedAt,
-      targetVotes: configs.ranking.targetVotes,
-    });
+  if (shouldBecomeDormant(likeCount, passCount, dormant) && ["EXPLORING", "ACTIVE"].includes(currentStatus)) {
+    return "DORMANT";
+  }
 
-    let tagStatus: ContentTagStatus = ct.status;
-    if (shouldBecomeDormant(content.likeCount, content.passCount, configs.dormant)) {
-      tagStatus = "DORMANT";
-    } else if (
-      meetsRankingEligibility(
-        content.likeCount,
-        content.passCount,
-        configs.ranking.minVotes,
-        configs.ranking.minLikes
-      ) &&
-      content.status === "ACTIVE"
-    ) {
-      tagStatus = "ACTIVE";
-    }
+  if (
+    currentStatus === "EXPLORING" &&
+    meetsRankingEligibility(likeCount, passCount, ranking.minVotes, ranking.minLikes)
+  ) {
+    return "ACTIVE";
+  }
 
-    await prisma.contentTag.update({
-      where: { id: ct.id },
+  return currentStatus;
+}
+
+/**
+ * Recomputes Content + ContentTag aggregates from authoritative Vote and NpcEvaluation rows.
+ * Safe under concurrent updates (no lost increments).
+ */
+export async function recomputeVoteAggregates(contentId: string, tx?: TxClient) {
+  const run = async (client: TxClient | typeof prisma) => {
+    const configs = await getAppConfigs();
+    const content = await client.content.findUnique({ where: { id: contentId } });
+    if (!content) return null;
+
+    const counts = await countVotesFromSources(contentId, client);
+    const likeRate = computeLikeRate(counts.likeCount, counts.passCount);
+    const wilsonLower = wilsonLowerBound(counts.likeCount, counts.passCount);
+    const status = resolveLifecycleStatus(
+      content.status,
+      counts.likeCount,
+      counts.passCount,
+      configs.dormant,
+      configs.ranking,
+    );
+
+    await client.content.update({
+      where: { id: contentId },
       data: {
-        likeCount: content.likeCount,
-        passCount: content.passCount,
-        voteCount: content.voteCount,
-        rankingScore,
-        status: tagStatus,
+        likeCount: counts.likeCount,
+        passCount: counts.passCount,
+        voteCount: counts.voteCount,
+        likeRate,
+        wilsonLower,
+        status,
       },
     });
-  }
+
+    const contentTags = await client.contentTag.findMany({ where: { contentId } });
+    for (const ct of contentTags) {
+      const rankingScore = computeRankingScore({
+        likeCount: counts.likeCount,
+        passCount: counts.passCount,
+        publishedAt: content.publishedAt,
+        targetVotes: configs.ranking.targetVotes,
+      });
+
+      let tagStatus: ContentTagStatus = ct.status;
+      if (ct.status !== "REMOVED") {
+        if (shouldBecomeDormant(counts.likeCount, counts.passCount, configs.dormant)) {
+          tagStatus = "DORMANT";
+        } else if (
+          meetsRankingEligibility(
+            counts.likeCount,
+            counts.passCount,
+            configs.ranking.minVotes,
+            configs.ranking.minLikes,
+          ) &&
+          status === "ACTIVE"
+        ) {
+          tagStatus = "ACTIVE";
+        }
+      }
+
+      await client.contentTag.update({
+        where: { id: ct.id },
+        data: {
+          likeCount: counts.likeCount,
+          passCount: counts.passCount,
+          voteCount: counts.voteCount,
+          rankingScore,
+          status: tagStatus,
+        },
+      });
+    }
+
+    return { ...counts, likeRate, wilsonLower, status };
+  };
+
+  if (tx) return run(tx);
+  return run(prisma);
+}
+
+/** Recomputes aggregates from Vote + NpcEvaluation (delta args ignored; kept for call-site compatibility). */
+export async function updateVoteAggregates(
+  contentId: string,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  oldValue?: "LIKE" | "PASS",
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  newValue?: "LIKE" | "PASS",
+) {
+  await recomputeVoteAggregates(contentId);
+  await evaluateLifecycle(contentId);
 }
 
 export async function evaluateLifecycle(contentId: string) {
@@ -104,7 +170,10 @@ export async function evaluateLifecycle(contentId: string) {
   }
 }
 
-export async function recalculateTagRanking(tagId: string, period: "ALL_TIME" | "DAILY" | "WEEKLY" | "MONTHLY" = "ALL_TIME") {
+export async function recalculateTagRanking(
+  tagId: string,
+  period: "ALL_TIME" | "DAILY" | "WEEKLY" | "MONTHLY" = "ALL_TIME",
+) {
   const configs = await getAppConfigs();
   const periodStart = getPeriodStart(period);
 
@@ -126,8 +195,8 @@ export async function recalculateTagRanking(tagId: string, period: "ALL_TIME" | 
         ct.content.likeCount,
         ct.content.passCount,
         configs.ranking.minVotes,
-        configs.ranking.minLikes
-      )
+        configs.ranking.minLikes,
+      ),
     )
     .map((ct) => ({
       ...ct,

@@ -1,11 +1,17 @@
 import PgBoss from "pg-boss";
 
-export const JOB_QUEUE_NAMES = ["process_image", "recalculate_ranking"] as const;
+export const JOB_QUEUE_NAMES = ["process_image", "npc_review_image", "recalculate_ranking"] as const;
 
 export const PROCESS_IMAGE_JOB_OPTIONS: PgBoss.SendOptions = {
   retryLimit: 3,
   retryBackoff: true,
   retryDelay: 30,
+};
+
+export const NPC_REVIEW_JOB_OPTIONS: PgBoss.SendOptions = {
+  retryLimit: 3,
+  retryBackoff: true,
+  retryDelay: 45,
 };
 
 let boss: PgBoss | null = null;
@@ -61,6 +67,8 @@ export async function enqueueJob(name: string, data: Record<string, unknown>) {
 
   if (name === "process_image") {
     await b.send(name, data, PROCESS_IMAGE_JOB_OPTIONS);
+  } else if (name === "npc_review_image") {
+    await b.send(name, data, NPC_REVIEW_JOB_OPTIONS);
   } else {
     await b.send(name, data);
   }

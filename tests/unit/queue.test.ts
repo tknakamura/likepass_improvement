@@ -35,6 +35,18 @@ describe("isExcludedFromQueue", () => {
     expect(isExcludedFromQueue(c, { userId: "u1", preferences: [], votedContentIds: new Set(), sessionHistory: [] })).toBe(true);
   });
 
+  it("excludes NPC_REVIEWING content", () => {
+    const c = makeCandidate({ id: "c1", userId: "u2", status: "NPC_REVIEWING" });
+    expect(
+      isExcludedFromQueue(c, {
+        userId: "u1",
+        preferences: [],
+        votedContentIds: new Set(),
+        sessionHistory: [],
+      }),
+    ).toBe(true);
+  });
+
   it("excludes content without selected tags", () => {
     const c = makeCandidate({
       id: "c1",

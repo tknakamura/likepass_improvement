@@ -5,12 +5,26 @@ import Link from "next/link";
 import Image from "next/image";
 import { getPublicImageUrl } from "@/lib/r2";
 import { getContentStatusHint, getContentStatusLabel } from "@/lib/content-status";
+import { isPublicContentStatus } from "@/server/services/content/access";
 import { MeSubpageHeader } from "@/components/me/me-subpage-header";
 import type { ContentStatus } from "@prisma/client";
+
+function postImageUrl(objectKey: string, status: ContentStatus): string {
+  if (objectKey.startsWith("http://") || objectKey.startsWith("https://")) {
+    return objectKey;
+  }
+  if (!isPublicContentStatus(status)) {
+    return `/api/images/${objectKey.split("/").map(encodeURIComponent).join("/")}`;
+  }
+  return getPublicImageUrl(objectKey);
+}
 
 function statusBadgeClass(status: ContentStatus): string {
   if (status === "ACTIVE" || status === "EXPLORING") {
     return "bg-[var(--primary)]/10 text-[var(--primary)]";
+  }
+  if (status === "NPC_REVIEWING") {
+    return "bg-amber-500/15 text-amber-800 dark:text-amber-200";
   }
   if (status === "DORMANT" || status === "REJECTED") {
     return "bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-200";
@@ -52,7 +66,7 @@ export default async function MePostsPage() {
                 <div className="relative aspect-square bg-[var(--muted)]">
                   {imageKey ? (
                     <Image
-                      src={getPublicImageUrl(imageKey)}
+                      src={postImageUrl(imageKey, post.status)}
                       alt=""
                       fill
                       className="object-cover"

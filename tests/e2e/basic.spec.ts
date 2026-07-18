@@ -83,6 +83,34 @@ test("upload page is accessible", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "写真を投稿" })).toBeVisible();
 });
 
+test("NPC reviewing content is hidden from other users", async ({ page, browser }) => {
+  const demoMode = process.env.DEMO_MODE === "true";
+  test.skip(!demoMode, "Requires DEMO_MODE=true");
+
+  // Owner signs in and opens their posts; if any NPC審査中 badge exists, capture its href.
+  await page.goto("/signin");
+  await page.getByRole("button", { name: /デモで/ }).click();
+  await page.waitForURL(/\/(evaluate|onboarding|ranking|me)/, { timeout: 15000 });
+
+  await page.goto("/me/posts");
+  await expect(page.getByRole("heading", { name: "自分の投稿" })).toBeVisible();
+
+  const reviewing = page.locator("a", { hasText: "NPC審査中" }).first();
+  if ((await reviewing.count()) === 0) {
+    test.skip(true, "No NPC_REVIEWING posts in demo data");
+    return;
+  }
+
+  const href = await reviewing.getAttribute("href");
+  expect(href).toBeTruthy();
+
+  // Anonymous visitor must not see the reviewing content detail.
+  const anon = await browser.newPage();
+  const res = await anon.goto(href!);
+  expect(res?.status()).toBe(404);
+  await anon.close();
+});
+
 test("likes gallery page is accessible", async ({ page }) => {
   const demoMode = process.env.DEMO_MODE === "true";
   test.skip(!demoMode, "Requires DEMO_MODE=true");

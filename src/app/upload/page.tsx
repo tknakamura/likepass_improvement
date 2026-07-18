@@ -80,7 +80,7 @@ export default function UploadPage() {
         throw new Error("complete failed");
       }
 
-      setStatus("完了！AIがタグを付与中です。");
+      setStatus("完了！AIタグ付けとNPC審査を開始します。");
       router.push(`/content/${presignData.contentId}`);
     } catch (err) {
       const key = err instanceof Error ? err.message : "";

@@ -22,6 +22,7 @@ enum UserRole {
 enum ContentStatus {
   UPLOADING
   PROCESSING
+  NPC_REVIEWING
   REVIEW_REQUIRED
   EXPLORING
   ACTIVE
@@ -222,11 +223,51 @@ model Content {
   impressions  Impression[]
   reports      Report[]
   rankingSnapshots RankingSnapshot[]
+  npcEvaluations NpcEvaluation[]
 
   @@index([userId])
   @@index([status])
   @@index([perceptualHash])
   @@index([publishedAt])
+}
+
+model NpcJudge {
+  id              String   @id
+  slug            String   @unique
+  displayName     String
+  countryCode     String
+  countryNameJa   String
+  personaJa       String   @db.Text
+  viewingLensJa   String   @db.Text
+  initials        String
+  sortOrder       Int      @default(0)
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  evaluations NpcEvaluation[]
+
+  @@index([active, sortOrder])
+}
+
+model NpcEvaluation {
+  id           String    @id @default(cuid())
+  contentId    String
+  judgeId      String
+  value        VoteValue
+  commentJa    String    @db.Text
+  confidence   Float?
+  modelName    String?
+  promptVersion String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  content Content  @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  judge   NpcJudge @relation(fields: [judgeId], references: [id], onDelete: Cascade)
+
+  @@unique([contentId, judgeId])
+  @@index([contentId])
+  @@index([judgeId])
 }
 
 model Tag {
