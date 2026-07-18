@@ -10,9 +10,9 @@ export type QueuePair = ContentTag & {
 export interface QueueContext {
   userId: string;
   preferences: UserTagPreference[];
-  /** Keys are `${contentId}:${tagId}` */
-  votedPairKeys: Set<string>;
-  /** Keys are `${contentId}:${tagId}` */
+  /** Already-voted photo IDs (one vote per content). */
+  votedContentIds: Set<string>;
+  /** Recently shown photo IDs in this session. */
   sessionHistory: string[];
   tagSlugs?: string[];
 }
@@ -24,20 +24,16 @@ const POOL_WEIGHTS = {
   experiment: 0.05,
 };
 
-export function pairKey(contentId: string, tagId: string): string {
-  return `${contentId}:${tagId}`;
-}
-
 function classifyPool(pair: QueuePair): keyof typeof POOL_WEIGHTS {
   if (pair.content.status === "EXPLORING" || pair.status === "PENDING") return "exploring";
-  if (pair.voteCount < 20) return "underVoted";
-  if (pair.wilsonLower >= 0.5) return "highQuality";
+  if (pair.content.voteCount < 20) return "underVoted";
+  if (pair.content.wilsonLower >= 0.5) return "highQuality";
   return "experiment";
 }
 
 export function isExcludedFromQueue(pair: QueuePair, context: QueueContext): boolean {
   if (pair.content.userId === context.userId) return true;
-  if (context.votedPairKeys.has(pairKey(pair.contentId, pair.tagId))) return true;
+  if (context.votedContentIds.has(pair.contentId)) return true;
   if (
     [
       "DORMANT",
@@ -65,6 +61,22 @@ export function selectNextPair(candidates: QueuePair[], context: QueueContext): 
   const eligible = candidates.filter((c) => !isExcludedFromQueue(c, context));
   if (eligible.length === 0) return null;
 
+  // Deduplicate by content so the same photo is not offered twice via different tags.
+  const byContent = new Map<string, QueuePair>();
+  for (const pair of eligible) {
+    const existing = byContent.get(pair.contentId);
+    if (!existing) {
+      byContent.set(pair.contentId, pair);
+      continue;
+    }
+    // Prefer a preferred tag when available.
+    const preferredTagIds = new Set(context.preferences.map((p) => p.tagId));
+    if (!preferredTagIds.has(existing.tagId) && preferredTagIds.has(pair.tagId)) {
+      byContent.set(pair.contentId, pair);
+    }
+  }
+  const unique = [...byContent.values()];
+
   const pools: Record<keyof typeof POOL_WEIGHTS, QueuePair[]> = {
     highQuality: [],
     exploring: [],
@@ -72,13 +84,13 @@ export function selectNextPair(candidates: QueuePair[], context: QueueContext): 
     experiment: [],
   };
 
-  for (const c of eligible) {
+  for (const c of unique) {
     pools[classifyPool(c)].push(c);
   }
 
-  const lastPairKey = context.sessionHistory[context.sessionHistory.length - 1];
-  const lastAuthor = lastPairKey
-    ? eligible.find((c) => pairKey(c.contentId, c.tagId) === lastPairKey)?.content.userId
+  const lastContentId = context.sessionHistory[context.sessionHistory.length - 1];
+  const lastAuthor = lastContentId
+    ? unique.find((c) => c.contentId === lastContentId)?.content.userId
     : null;
 
   const preferredTagIds = new Set(context.preferences.map((p) => p.tagId));
@@ -87,7 +99,7 @@ export function selectNextPair(candidates: QueuePair[], context: QueueContext): 
     let s = Math.random();
     if (preferredTagIds.has(candidate.tagId)) s += 2;
     if (lastAuthor && candidate.content.userId === lastAuthor) s -= 10;
-    if (context.sessionHistory.includes(pairKey(candidate.contentId, candidate.tagId))) s -= 10;
+    if (context.sessionHistory.includes(candidate.contentId)) s -= 10;
     return s;
   }
 
@@ -102,16 +114,18 @@ export function selectNextPair(candidates: QueuePair[], context: QueueContext): 
     }
   }
 
-  const pool = pools[poolKey].length > 0 ? pools[poolKey] : eligible;
+  const pool = pools[poolKey].length > 0 ? pools[poolKey] : unique;
   pool.sort((a, b) => score(b) - score(a));
   return pool[0] ?? null;
 }
 
-/** @deprecated Use selectNextPair */
+export function buildVotedSet(votes: Pick<Vote, "contentId">[]): Set<string> {
+  return new Set(votes.map((v) => v.contentId));
+}
+
+/** @deprecated Prefer selectNextPair + buildVotedSet */
 export function selectNextContent(
-  candidates: Array<
-    Content & { contentTags: (ContentTag & { tag: Tag })[] }
-  >,
+  candidates: Array<Content & { contentTags: (ContentTag & { tag: Tag })[] }>,
   context: {
     userId: string;
     preferences: UserTagPreference[];
@@ -127,41 +141,14 @@ export function selectNextContent(
     }
   }
 
-  const votedPairKeys = new Set<string>();
-  for (const contentId of context.votedContentIds) {
-    // Legacy: exclude all tags of already-voted content
-    for (const content of candidates) {
-      if (content.id !== contentId) continue;
-      for (const ct of content.contentTags) {
-        votedPairKeys.add(pairKey(contentId, ct.tagId));
-      }
-    }
-  }
-
   const selected = selectNextPair(pairs, {
     userId: context.userId,
     preferences: context.preferences,
-    votedPairKeys,
+    votedContentIds: context.votedContentIds,
     sessionHistory: context.sessionHistory,
     tagSlugs: context.tagSlugs,
   });
   return selected?.content ?? null;
-}
-
-export function buildVotedPairSet(
-  votes: Pick<Vote, "contentId" | "sourceTagId">[],
-): Set<string> {
-  const keys = new Set<string>();
-  for (const vote of votes) {
-    if (vote.sourceTagId) {
-      keys.add(pairKey(vote.contentId, vote.sourceTagId));
-    }
-  }
-  return keys;
-}
-
-export function buildVotedSet(votes: Pick<Vote, "contentId">[]): Set<string> {
-  return new Set(votes.map((v) => v.contentId));
 }
 
 /** @deprecated Prefer isExcludedFromQueue on QueuePair */

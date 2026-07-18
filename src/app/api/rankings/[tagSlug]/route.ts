@@ -35,7 +35,12 @@ export async function GET(
     ? new Set(
         (
           await prisma.vote.findMany({
-            where: { userId: session.user.id, sourceTagId: tag.id },
+            where: {
+              userId: session.user.id,
+              content: {
+                contentTags: { some: { tagId: tag.id, status: { not: "REMOVED" } } },
+              },
+            },
             select: { contentId: true },
           })
         ).map((v) => v.contentId),

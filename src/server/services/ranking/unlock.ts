@@ -7,28 +7,29 @@ export interface UnlockedRanking {
   rank: number;
 }
 
+/**
+ * After a photo-level vote, unlock rankings for every tag attached to that photo
+ * when the content is ACTIVE and ranked in the top 100 for that tag.
+ */
 export async function getUnlockedRankingsForVote(
   userId: string,
   contentId: string,
-  sourceTagId: string,
 ): Promise<UnlockedRanking[]> {
   const vote = await prisma.vote.findUnique({
     where: {
-      userId_contentId_sourceTagId: {
+      userId_contentId: {
         userId,
         contentId,
-        sourceTagId,
       },
     },
   });
   if (!vote) return [];
 
-  const contentTag = await prisma.contentTag.findUnique({
+  const contentTags = await prisma.contentTag.findMany({
     where: {
-      contentId_tagId: {
-        contentId,
-        tagId: sourceTagId,
-      },
+      contentId,
+      status: "ACTIVE",
+      content: { status: "ACTIVE" },
     },
     include: {
       tag: true,
@@ -36,16 +37,16 @@ export async function getUnlockedRankingsForVote(
     },
   });
 
-  if (!contentTag) return [];
-  if (contentTag.status !== "ACTIVE" || contentTag.content.status !== "ACTIVE") return [];
-  if (contentTag.currentRank == null || contentTag.currentRank > 100) return [];
-  if (!meetsRankingEligibility(contentTag.likeCount, contentTag.passCount)) return [];
-
-  return [
-    {
+  const unlocked: UnlockedRanking[] = [];
+  for (const contentTag of contentTags) {
+    if (contentTag.currentRank == null || contentTag.currentRank > 100) continue;
+    if (!meetsRankingEligibility(contentTag.likeCount, contentTag.passCount)) continue;
+    unlocked.push({
       tagSlug: contentTag.tag.slug,
       displayName: contentTag.tag.displayName,
       rank: contentTag.currentRank,
-    },
-  ];
+    });
+  }
+
+  return unlocked;
 }

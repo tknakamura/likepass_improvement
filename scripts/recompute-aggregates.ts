@@ -1,5 +1,6 @@
 /**
- * Recomputes Content + ContentTag aggregates with tag-scoped vote rules.
+ * Recomputes Content + ContentTag aggregates with photo-level vote rules
+ * (the same totals are copied onto every attached tag for ranking).
  *
  * Usage:
  *   DATABASE_URL=... npx tsx scripts/recompute-aggregates.ts

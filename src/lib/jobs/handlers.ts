@@ -290,7 +290,7 @@ export async function startWorker() {
 
   await requeuePendingImages(b!);
   await requeuePendingNpcReviews(b!);
-  await requeueMissingTagScopedNpcReviews(b!);
+  await requeueIncompleteNpcReviews(b!);
   await requeueEnvContentIds(b!);
   await recomputeAggregatesIfRequested();
 
@@ -411,28 +411,25 @@ async function requeuePendingNpcReviews(boss: PgBoss) {
   }
 }
 
-/** Backfill tag-scoped NPC panels for published posts that still lack them. */
-async function requeueMissingTagScopedNpcReviews(boss: PgBoss) {
+/** Backfill photo-level NPC panels that still have fewer than 10 judge votes. */
+async function requeueIncompleteNpcReviews(boss: PgBoss) {
   const candidates = await prisma.content.findMany({
     where: {
-      status: { in: ["EXPLORING", "ACTIVE"] },
+      status: { in: ["NPC_REVIEWING", "EXPLORING", "ACTIVE"] },
       aiSafetyStatus: "SAFE",
-      contentTags: { some: { status: { not: "REMOVED" } } },
     },
     select: {
       id: true,
-      contentTags: { where: { status: { not: "REMOVED" } }, select: { tagId: true } },
-      _count: {
-        select: { npcEvaluations: { where: { tagId: { not: null } } } },
-      },
+      status: true,
+      _count: { select: { npcEvaluations: true } },
     },
     orderBy: { createdAt: "asc" },
     take: 50,
   });
 
   const missing = candidates.filter((c) => {
-    const expected = c.contentTags.length * NPC_JUDGE_COUNT;
-    return expected > 0 && c._count.npcEvaluations < expected;
+    if (c.status === "NPC_REVIEWING") return true;
+    return c._count.npcEvaluations < NPC_JUDGE_COUNT;
   });
 
   for (const { id } of missing) {
@@ -440,6 +437,6 @@ async function requeueMissingTagScopedNpcReviews(boss: PgBoss) {
   }
 
   if (missing.length > 0) {
-    console.log(`Requeued ${missing.length} content(s) missing tag-scoped NPC reviews`);
+    console.log(`Requeued ${missing.length} content(s) with incomplete NPC reviews`);
   }
 }

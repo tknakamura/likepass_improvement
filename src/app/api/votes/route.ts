@@ -9,31 +9,43 @@ import { enqueueJob } from "@/lib/jobs";
 const schema = z.object({
   contentId: z.string(),
   value: z.enum(["LIKE", "PASS"]),
-  sourceTagId: z.string().min(1),
+  /** Optional display-context tag; not part of vote identity. */
+  contextTagId: z.string().optional(),
   sessionId: z.string().optional(),
   responseTimeMs: z.number().optional(),
 });
 
 const undoSchema = z.object({
   contentId: z.string(),
-  sourceTagId: z.string().min(1),
 });
 
 const UNDO_WINDOW_MS = 5000;
 
-async function assertEvaluableTag(contentId: string, sourceTagId: string) {
-  const contentTag = await prisma.contentTag.findUnique({
-    where: { contentId_tagId: { contentId, tagId: sourceTagId } },
-    include: { tag: true, content: true },
+async function assertEvaluableContent(contentId: string) {
+  const content = await prisma.content.findUnique({
+    where: { id: contentId },
+    include: {
+      contentTags: {
+        where: { status: { not: "REMOVED" } },
+        select: { tagId: true },
+      },
+    },
   });
 
-  if (!contentTag || contentTag.status === "REMOVED") {
+  if (!content || !["EXPLORING", "ACTIVE"].includes(content.status)) {
     return null;
   }
-  if (!["EXPLORING", "ACTIVE"].includes(contentTag.content.status)) {
-    return null;
+  return content;
+}
+
+async function enqueueTagRankings(contentId: string) {
+  const tags = await prisma.contentTag.findMany({
+    where: { contentId, status: { not: "REMOVED" } },
+    select: { tagId: true },
+  });
+  for (const { tagId } of tags) {
+    await enqueueJob("recalculate_ranking", { tagId });
   }
-  return contentTag;
 }
 
 export async function POST(request: Request) {
@@ -48,17 +60,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid vote" }, { status: 400 });
   }
 
-  const contentTag = await assertEvaluableTag(parsed.data.contentId, parsed.data.sourceTagId);
-  if (!contentTag) {
+  const content = await assertEvaluableContent(parsed.data.contentId);
+  if (!content) {
     return NextResponse.json({ error: "Content not available" }, { status: 404 });
   }
 
   const existing = await prisma.vote.findUnique({
     where: {
-      userId_contentId_sourceTagId: {
+      userId_contentId: {
         userId: session.user.id,
         contentId: parsed.data.contentId,
-        sourceTagId: parsed.data.sourceTagId,
       },
     },
   });
@@ -67,25 +78,35 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Already voted" }, { status: 409 });
   }
 
-  const vote = await prisma.vote.create({
-    data: {
-      userId: session.user.id,
-      contentId: parsed.data.contentId,
-      value: parsed.data.value,
-      sourceTagId: parsed.data.sourceTagId,
-      sessionId: parsed.data.sessionId,
-      responseTimeMs: parsed.data.responseTimeMs,
-    },
-  });
+  let vote;
+  try {
+    vote = await prisma.vote.create({
+      data: {
+        userId: session.user.id,
+        contentId: parsed.data.contentId,
+        value: parsed.data.value,
+        sessionId: parsed.data.sessionId,
+        responseTimeMs: parsed.data.responseTimeMs,
+      },
+    });
+  } catch {
+    return NextResponse.json({ error: "Already voted" }, { status: 409 });
+  }
 
   await updateVoteAggregates(parsed.data.contentId);
+
+  const contextTagId =
+    parsed.data.contextTagId &&
+    content.contentTags.some((ct) => ct.tagId === parsed.data.contextTagId)
+      ? parsed.data.contextTagId
+      : undefined;
 
   if (parsed.data.sessionId) {
     await prisma.impression.create({
       data: {
         userId: session.user.id,
         contentId: parsed.data.contentId,
-        tagId: parsed.data.sourceTagId,
+        tagId: contextTagId,
         sessionId: parsed.data.sessionId,
         source: "evaluate",
         result: parsed.data.value,
@@ -93,40 +114,25 @@ export async function POST(request: Request) {
     });
   }
 
-  const updatedTag = await prisma.contentTag.findUnique({
-    where: {
-      contentId_tagId: {
-        contentId: parsed.data.contentId,
-        tagId: parsed.data.sourceTagId,
-      },
-    },
-  });
-
-  await enqueueJob("recalculate_ranking", { tagId: parsed.data.sourceTagId });
+  const updated = await prisma.content.findUnique({ where: { id: parsed.data.contentId } });
+  await enqueueTagRankings(parsed.data.contentId);
 
   const unlockedRankings = await getUnlockedRankingsForVote(
     session.user.id,
     parsed.data.contentId,
-    parsed.data.sourceTagId,
   );
 
   return NextResponse.json({
     vote: {
       contentId: vote.contentId,
-      sourceTagId: vote.sourceTagId,
       value: vote.value,
       undoUntil: Date.now() + UNDO_WINDOW_MS,
     },
     result: {
-      likeCount: updatedTag?.likeCount ?? 0,
-      passCount: updatedTag?.passCount ?? 0,
-      likeRate: updatedTag?.likeRate ?? 0,
-      rankingStatus: updatedTag?.status ?? "PENDING",
-      tag: {
-        id: contentTag.tag.id,
-        slug: contentTag.tag.slug,
-        displayName: contentTag.tag.displayName,
-      },
+      likeCount: updated?.likeCount ?? 0,
+      passCount: updated?.passCount ?? 0,
+      likeRate: updated?.likeRate ?? 0,
+      rankingStatus: updated?.status ?? "EXPLORING",
     },
     unlockedRankings,
     next: { prefetch: true },
@@ -147,10 +153,9 @@ export async function PATCH(request: Request) {
 
   const existing = await prisma.vote.findUnique({
     where: {
-      userId_contentId_sourceTagId: {
+      userId_contentId: {
         userId: session.user.id,
         contentId: parsed.data.contentId,
-        sourceTagId: parsed.data.sourceTagId,
       },
     },
   });
@@ -179,7 +184,7 @@ export async function PATCH(request: Request) {
   });
 
   await updateVoteAggregates(parsed.data.contentId);
-  await enqueueJob("recalculate_ranking", { tagId: parsed.data.sourceTagId });
+  await enqueueTagRankings(parsed.data.contentId);
 
   return NextResponse.json({ vote });
 }
@@ -198,10 +203,9 @@ export async function DELETE(request: Request) {
 
   const existing = await prisma.vote.findUnique({
     where: {
-      userId_contentId_sourceTagId: {
+      userId_contentId: {
         userId: session.user.id,
         contentId: parsed.data.contentId,
-        sourceTagId: parsed.data.sourceTagId,
       },
     },
   });
@@ -219,7 +223,7 @@ export async function DELETE(request: Request) {
 
   await prisma.vote.delete({ where: { id: existing.id } });
   await updateVoteAggregates(parsed.data.contentId);
-  await enqueueJob("recalculate_ranking", { tagId: parsed.data.sourceTagId });
+  await enqueueTagRankings(parsed.data.contentId);
 
   return NextResponse.json({ success: true });
 }

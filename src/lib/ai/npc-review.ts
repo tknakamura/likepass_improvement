@@ -7,7 +7,6 @@ import {
   parseNpcReviewResponse,
   type NpcJudgeProfile,
   type NpcReviewResult,
-  type NpcTagContext,
 } from "@/lib/ai/npc-review-schema";
 import { buildNpcReviewSystemPrompt, buildNpcReviewUserPrompt } from "@/lib/ai/npc-review-prompt";
 
@@ -16,7 +15,6 @@ export type {
   NpcReviewResult,
   NpcJudgeDecision,
   NpcVoteValue,
-  NpcTagContext,
 } from "@/lib/ai/npc-review-schema";
 export { NpcReviewError, NPC_REVIEW_PROMPT_VERSION, parseNpcReviewResponse } from "@/lib/ai/npc-review-schema";
 
@@ -25,7 +23,6 @@ export interface NpcReviewProvider {
     imageBuffer: Buffer,
     mimeType: string,
     judges: NpcJudgeProfile[],
-    tag?: NpcTagContext,
   ): Promise<NpcReviewResult>;
 }
 
@@ -84,21 +81,17 @@ export class MockNpcReviewProvider implements NpcReviewProvider {
     _imageBuffer: Buffer,
     _mimeType: string,
     judges: NpcJudgeProfile[],
-    tag?: NpcTagContext,
   ): Promise<NpcReviewResult> {
     const sorted = [...judges].sort((a, b) => a.sortOrder - b.sortOrder);
-    const tagBias = tag ? tag.slug.length % 2 : 0;
     const decisions = sorted.map((judge, index) => {
-      const like = (index + tagBias) % 2 === 0;
+      const like = index % 2 === 0;
       const value = like ? ("LIKE" as const) : ("PASS" as const);
-      const tagLabel = tag ? `#${tag.slug}として` : "";
       return {
         judgeId: judge.id,
-        tagId: tag?.id,
         value,
         commentJa: like
-          ? `${judge.countryNameJa}視点で、${tagLabel}${judge.viewingLensJa.split("、")[0]}が良い。`
-          : `${judge.countryNameJa}視点では、${tagLabel}もう少し印象が欲しい。`,
+          ? `${judge.countryNameJa}視点で、${judge.viewingLensJa.split("、")[0]}が良い。`
+          : `${judge.countryNameJa}視点では、もう少し印象が欲しい。`,
         confidence: like ? 0.82 : 0.74,
       };
     });
@@ -121,10 +114,9 @@ export class OpenAINpcReviewProvider implements NpcReviewProvider {
     imageBuffer: Buffer,
     mimeType: string,
     judges: NpcJudgeProfile[],
-    tag?: NpcTagContext,
   ): Promise<NpcReviewResult> {
     if (!this.apiKey) {
-      return new MockNpcReviewProvider().review(imageBuffer, mimeType, judges, tag);
+      return new MockNpcReviewProvider().review(imageBuffer, mimeType, judges);
     }
 
     try {
@@ -141,11 +133,11 @@ export class OpenAINpcReviewProvider implements NpcReviewProvider {
           temperature: 0.35,
           response_format: { type: "json_object" },
           messages: [
-            { role: "system", content: buildNpcReviewSystemPrompt(tag) },
+            { role: "system", content: buildNpcReviewSystemPrompt() },
             {
               role: "user",
               content: [
-                { type: "text", text: buildNpcReviewUserPrompt(judges, tag) },
+                { type: "text", text: buildNpcReviewUserPrompt(judges) },
                 {
                   type: "image_url",
                   image_url: {
@@ -189,7 +181,7 @@ export class OpenAINpcReviewProvider implements NpcReviewProvider {
       assertCompleteNpcPanel(decisions, judges.length);
 
       return {
-        decisions: decisions.map((d) => ({ ...d, tagId: tag?.id })),
+        decisions,
         modelName: this.model,
         promptVersion: NPC_REVIEW_PROMPT_VERSION,
       };

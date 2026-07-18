@@ -2,8 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   selectNextPair,
   isExcludedFromQueue,
-  buildVotedPairSet,
-  pairKey,
+  buildVotedSet,
   type QueuePair,
 } from "@/server/services/evaluation/queue";
 import type { Content, ContentTag, Tag } from "@prisma/client";
@@ -40,6 +39,8 @@ function makePair(
     id: overrides.contentId,
     userId: overrides.userId,
     status: overrides.contentStatus ?? "ACTIVE",
+    voteCount: overrides.voteCount ?? 30,
+    wilsonLower: overrides.wilsonLower ?? 0.6,
     contentTags: [contentTag],
   } as Content & { contentTags: (ContentTag & { tag: Tag })[] };
 
@@ -53,19 +54,19 @@ describe("isExcludedFromQueue", () => {
       isExcludedFromQueue(pair, {
         userId: "u1",
         preferences: [],
-        votedPairKeys: new Set(),
+        votedContentIds: new Set(),
         sessionHistory: [],
       }),
     ).toBe(true);
   });
 
-  it("excludes voted content×tag pairs only", () => {
+  it("excludes already-voted photos across all tags", () => {
     const pair = makePair({ contentId: "c1", tagId: "t1", userId: "u2" });
     expect(
       isExcludedFromQueue(pair, {
         userId: "u1",
         preferences: [],
-        votedPairKeys: new Set([pairKey("c1", "t1")]),
+        votedContentIds: new Set(["c1"]),
         sessionHistory: [],
       }),
     ).toBe(true);
@@ -75,10 +76,10 @@ describe("isExcludedFromQueue", () => {
       isExcludedFromQueue(otherTag, {
         userId: "u1",
         preferences: [],
-        votedPairKeys: new Set([pairKey("c1", "t1")]),
+        votedContentIds: new Set(["c1"]),
         sessionHistory: [],
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("excludes dormant content and tags", () => {
@@ -92,7 +93,7 @@ describe("isExcludedFromQueue", () => {
       isExcludedFromQueue(dormantContent, {
         userId: "u1",
         preferences: [],
-        votedPairKeys: new Set(),
+        votedContentIds: new Set(),
         sessionHistory: [],
       }),
     ).toBe(true);
@@ -107,7 +108,24 @@ describe("isExcludedFromQueue", () => {
       isExcludedFromQueue(dormantTag, {
         userId: "u1",
         preferences: [],
-        votedPairKeys: new Set(),
+        votedContentIds: new Set(),
+        sessionHistory: [],
+      }),
+    ).toBe(true);
+  });
+
+  it("excludes NPC_REVIEWING content", () => {
+    const pair = makePair({
+      contentId: "c1",
+      tagId: "t1",
+      userId: "u2",
+      contentStatus: "NPC_REVIEWING",
+    });
+    expect(
+      isExcludedFromQueue(pair, {
+        userId: "u1",
+        preferences: [],
+        votedContentIds: new Set(),
         sessionHistory: [],
       }),
     ).toBe(true);
@@ -119,7 +137,7 @@ describe("isExcludedFromQueue", () => {
       isExcludedFromQueue(pair, {
         userId: "u1",
         preferences: [],
-        votedPairKeys: new Set(),
+        votedContentIds: new Set(),
         sessionHistory: [],
         tagSlugs: ["ramen"],
       }),
@@ -132,7 +150,7 @@ describe("isExcludedFromQueue", () => {
       isExcludedFromQueue(pair, {
         userId: "u1",
         preferences: [],
-        votedPairKeys: new Set(),
+        votedContentIds: new Set(),
         sessionHistory: [],
         tagSlugs: ["ramen", "night"],
       }),
@@ -147,7 +165,7 @@ describe("selectNextPair", () => {
       selectNextPair([pair], {
         userId: "u1",
         preferences: [],
-        votedPairKeys: new Set(),
+        votedContentIds: new Set(),
         sessionHistory: [],
       }),
     ).toBeNull();
@@ -158,14 +176,13 @@ describe("selectNextPair", () => {
     const result = selectNextPair([pair], {
       userId: "u1",
       preferences: [],
-      votedPairKeys: new Set(),
+      votedContentIds: new Set(),
       sessionHistory: [],
     });
     expect(result?.contentId).toBe("c1");
-    expect(result?.tagId).toBe("t1");
   });
 
-  it("can select another tag on already-voted photo", () => {
+  it("does not re-offer a photo via another tag after voting", () => {
     const child = makePair({ contentId: "c1", tagId: "t-child", userId: "u2", tagSlug: "child" });
     const interior = makePair({
       contentId: "c1",
@@ -176,21 +193,36 @@ describe("selectNextPair", () => {
     const result = selectNextPair([child, interior], {
       userId: "u1",
       preferences: [],
-      votedPairKeys: new Set([pairKey("c1", "t-child")]),
+      votedContentIds: new Set(["c1"]),
       sessionHistory: [],
     });
-    expect(result?.tagId).toBe("t-interior");
+    expect(result).toBeNull();
+  });
+
+  it("deduplicates the same photo offered under multiple tags", () => {
+    const child = makePair({ contentId: "c1", tagId: "t-child", userId: "u2", tagSlug: "child" });
+    const interior = makePair({
+      contentId: "c1",
+      tagId: "t-interior",
+      userId: "u2",
+      tagSlug: "interior",
+    });
+    const other = makePair({ contentId: "c2", tagId: "t-street", userId: "u3", tagSlug: "street" });
+    const result = selectNextPair([child, interior, other], {
+      userId: "u1",
+      preferences: [],
+      votedContentIds: new Set(),
+      sessionHistory: [],
+    });
+    expect(result).not.toBeNull();
+    expect(["c1", "c2"]).toContain(result!.contentId);
   });
 });
 
-describe("buildVotedPairSet", () => {
-  it("builds keys only for tagged votes", () => {
+describe("buildVotedSet", () => {
+  it("builds content IDs from votes", () => {
     expect(
-      buildVotedPairSet([
-        { contentId: "a", sourceTagId: "t1" },
-        { contentId: "b", sourceTagId: null },
-        { contentId: "c", sourceTagId: "t2" },
-      ]),
-    ).toEqual(new Set(["a:t1", "c:t2"]));
+      buildVotedSet([{ contentId: "a" }, { contentId: "b" }, { contentId: "a" }]),
+    ).toEqual(new Set(["a", "b"]));
   });
 });

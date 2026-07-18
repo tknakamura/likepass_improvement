@@ -28,13 +28,11 @@ interface UnlockedRanking {
 interface VoteFeedback {
   likeRate: number;
   voteCount: number;
-  tagSlug?: string;
   unlockedRankings: UnlockedRanking[];
 }
 
 interface LastVote {
   contentId: string;
-  sourceTagId: string;
   value: "LIKE" | "PASS";
   undoUntil: number;
 }
@@ -164,12 +162,10 @@ export default function EvaluateView() {
 
   const vote = useCallback(
     async (value: "LIKE" | "PASS") => {
-      if (!content?.contextTag || votingRef.current) return;
+      if (!content || votingRef.current) return;
       votingRef.current = true;
       setLoading(true);
       const votedContentId = content.id;
-      const sourceTagId = content.contextTag.id;
-      const tagSlug = content.contextTag.slug;
 
       const res = await fetch("/api/votes", {
         method: "POST",
@@ -177,7 +173,7 @@ export default function EvaluateView() {
         body: JSON.stringify({
           contentId: content.id,
           value,
-          sourceTagId,
+          contextTagId: content.contextTag?.id,
           sessionId,
           responseTimeMs: Date.now() - shownAt,
         }),
@@ -187,12 +183,10 @@ export default function EvaluateView() {
         setFeedback({
           likeRate: data.result.likeRate,
           voteCount: (data.result.likeCount ?? 0) + (data.result.passCount ?? 0),
-          tagSlug: data.result.tag?.slug ?? tagSlug,
           unlockedRankings: data.unlockedRankings ?? [],
         });
         setLastVote({
           contentId: votedContentId,
-          sourceTagId,
           value,
           undoUntil: data.vote?.undoUntil ?? Date.now() + 5000,
         });
@@ -218,7 +212,6 @@ export default function EvaluateView() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contentId: lastVote.contentId,
-        sourceTagId: lastVote.sourceTagId,
       }),
     });
     if (res.ok) {
@@ -332,16 +325,15 @@ export default function EvaluateView() {
         左右にスワイプ、またはボタンで評価できます
       </p>
 
-      {content?.contextTag && (
+      {content?.contextTag && selectedTagSlugs.size > 0 && (
         <p className="mt-1 text-sm text-center text-[var(--muted-foreground)]">
-          #{content.contextTag.slug} として評価中
+          #{content.contextTag.slug} から表示
         </p>
       )}
 
       {feedback && (
         <div className="mt-3 space-y-2 text-center">
           <p className="text-sm text-[var(--muted-foreground)]">
-            {feedback.tagSlug ? `#${feedback.tagSlug} ` : ""}
             LIKE率 {(feedback.likeRate * 100).toFixed(1)}% · {feedback.voteCount} 票
           </p>
           {feedback.unlockedRankings.length > 0 && (

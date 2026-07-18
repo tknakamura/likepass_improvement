@@ -39,22 +39,27 @@ export default async function RankingIndexPage() {
   const evaluatedByTagId = new Map<string, number>();
 
   if (session?.user?.id) {
-    const [voteCount, evaluatedCounts] = await Promise.all([
+    const [voteCount, votedWithTags] = await Promise.all([
       prisma.vote.count({ where: { userId: session.user.id } }),
-      prisma.vote.groupBy({
-        by: ["sourceTagId"],
-        where: {
-          userId: session.user.id,
-          sourceTagId: { not: null },
+      prisma.vote.findMany({
+        where: { userId: session.user.id },
+        select: {
+          content: {
+            select: {
+              contentTags: {
+                where: { status: { not: "REMOVED" } },
+                select: { tagId: true },
+              },
+            },
+          },
         },
-        _count: { contentId: true },
       }),
     ]);
 
     totalEvaluated = voteCount;
-    for (const row of evaluatedCounts) {
-      if (row.sourceTagId) {
-        evaluatedByTagId.set(row.sourceTagId, row._count.contentId);
+    for (const vote of votedWithTags) {
+      for (const ct of vote.content.contentTags) {
+        evaluatedByTagId.set(ct.tagId, (evaluatedByTagId.get(ct.tagId) ?? 0) + 1);
       }
     }
   }

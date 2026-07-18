@@ -17,7 +17,12 @@ export async function GET(
 
   const [votedIds, totalEligible] = await Promise.all([
     prisma.vote.findMany({
-      where: { userId: session.user.id, sourceTagId: tag.id },
+      where: {
+        userId: session.user.id,
+        content: {
+          contentTags: { some: { tagId: tag.id, status: { not: "REMOVED" } } },
+        },
+      },
       select: { contentId: true },
     }),
     prisma.contentTag.count({

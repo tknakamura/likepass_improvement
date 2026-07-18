@@ -32,31 +32,6 @@ async function countContentTotals(contentId: string, tx: TxClient | typeof prism
   };
 }
 
-async function countTagVotes(
-  contentId: string,
-  tagId: string,
-  tx: TxClient | typeof prisma = prisma,
-) {
-  const [humanLikes, humanPasses, npcLikes, npcPasses] = await Promise.all([
-    tx.vote.count({ where: { contentId, sourceTagId: tagId, value: "LIKE" } }),
-    tx.vote.count({ where: { contentId, sourceTagId: tagId, value: "PASS" } }),
-    tx.npcEvaluation.count({ where: { contentId, tagId, value: "LIKE" } }),
-    tx.npcEvaluation.count({ where: { contentId, tagId, value: "PASS" } }),
-  ]);
-
-  const likeCount = humanLikes + npcLikes;
-  const passCount = humanPasses + npcPasses;
-  return {
-    likeCount,
-    passCount,
-    voteCount: likeCount + passCount,
-    humanLikeCount: humanLikes,
-    humanPassCount: humanPasses,
-    npcLikeCount: npcLikes,
-    npcPassCount: npcPasses,
-  };
-}
-
 function resolveLifecycleStatus(
   currentStatus: ContentStatus,
   likeCount: number,
@@ -75,22 +50,28 @@ function resolveLifecycleStatus(
     return currentStatus;
   }
 
-  if (shouldBecomeDormant(likeCount, passCount, dormant) && ["EXPLORING", "ACTIVE"].includes(currentStatus)) {
+  if (shouldBecomeDormant(likeCount, passCount, dormant) && ["EXPLORING", "ACTIVE", "DORMANT"].includes(currentStatus)) {
     return "DORMANT";
   }
 
   if (
-    currentStatus === "EXPLORING" &&
-    meetsRankingEligibility(likeCount, passCount, ranking.minVotes, ranking.minLikes)
+    ["EXPLORING", "ACTIVE", "DORMANT"].includes(currentStatus) &&
+    meetsRankingEligibility(likeCount, passCount, ranking.minVotes, ranking.minLikes) &&
+    !shouldBecomeDormant(likeCount, passCount, dormant)
   ) {
     return "ACTIVE";
+  }
+
+  if (currentStatus === "ACTIVE" || currentStatus === "DORMANT") {
+    return "EXPLORING";
   }
 
   return currentStatus;
 }
 
 /**
- * Recomputes Content totals (all votes) and ContentTag aggregates (tag-scoped votes only).
+ * Recomputes Content totals from Vote + NpcEvaluation, then copies the same
+ * photo-level counts onto every ContentTag for ranking.
  */
 export async function recomputeVoteAggregates(contentId: string, tx?: TxClient) {
   const run = async (client: TxClient | typeof prisma) => {
@@ -122,27 +103,24 @@ export async function recomputeVoteAggregates(contentId: string, tx?: TxClient) 
     });
 
     const contentTags = await client.contentTag.findMany({ where: { contentId } });
-    for (const ct of contentTags) {
-      const tagCounts = await countTagVotes(contentId, ct.tagId, client);
-      const tagLikeRate = computeLikeRate(tagCounts.likeCount, tagCounts.passCount);
-      const tagWilson = wilsonLowerBound(tagCounts.likeCount, tagCounts.passCount);
-      const rankingScore = computeRankingScore({
-        likeCount: tagCounts.likeCount,
-        passCount: tagCounts.passCount,
-        publishedAt: content.publishedAt,
-        targetVotes: configs.ranking.targetVotes,
-      });
+    const rankingScore = computeRankingScore({
+      likeCount: totals.likeCount,
+      passCount: totals.passCount,
+      publishedAt: content.publishedAt,
+      targetVotes: configs.ranking.targetVotes,
+    });
 
+    for (const ct of contentTags) {
       let tagStatus: ContentTagStatus;
       if (ct.status === "REMOVED") {
         tagStatus = "REMOVED";
-      } else if (shouldBecomeDormant(tagCounts.likeCount, tagCounts.passCount, configs.dormant)) {
+      } else if (shouldBecomeDormant(totals.likeCount, totals.passCount, configs.dormant)) {
         tagStatus = "DORMANT";
       } else if (
         status === "ACTIVE" &&
         meetsRankingEligibility(
-          tagCounts.likeCount,
-          tagCounts.passCount,
+          totals.likeCount,
+          totals.passCount,
           configs.ranking.minVotes,
           configs.ranking.minLikes,
         )
@@ -155,11 +133,11 @@ export async function recomputeVoteAggregates(contentId: string, tx?: TxClient) 
       await client.contentTag.update({
         where: { id: ct.id },
         data: {
-          likeCount: tagCounts.likeCount,
-          passCount: tagCounts.passCount,
-          voteCount: tagCounts.voteCount,
-          likeRate: tagLikeRate,
-          wilsonLower: tagWilson,
+          likeCount: totals.likeCount,
+          passCount: totals.passCount,
+          voteCount: totals.voteCount,
+          likeRate,
+          wilsonLower,
           rankingScore,
           status: tagStatus,
         },

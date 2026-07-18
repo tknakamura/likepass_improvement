@@ -44,6 +44,8 @@ test("demo sign-in and evaluate page", async ({ page }) => {
   await page.goto("/evaluate");
   await expect(page.getByRole("button", { name: "LIKE" })).toBeVisible();
   await expect(page.getByRole("button", { name: "PASS" })).toBeVisible();
+  await expect(page.getByText("評価するタグ")).toBeVisible();
+  await expect(page.getByText(/として評価中/)).toHaveCount(0);
 });
 
 test("my page dashboard", async ({ page }) => {

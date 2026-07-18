@@ -18,14 +18,11 @@ export async function GET(
     include: {
       contentTags: { include: { tag: true } },
       npcEvaluations: {
-        include: {
-          judge: true,
-          tag: true,
-        },
-        orderBy: [{ tagId: "asc" }, { judge: { sortOrder: "asc" } }],
+        include: { judge: true },
+        orderBy: { judge: { sortOrder: "asc" } },
       },
       votes: {
-        select: { value: true, sourceTagId: true },
+        select: { value: true },
       },
     },
   });
@@ -34,10 +31,7 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const tagCount = content.contentTags.filter((ct) => ct.status !== "REMOVED").length;
-  const expectedNpc = Math.max(NPC_JUDGE_COUNT, tagCount * NPC_JUDGE_COUNT);
-  const taggedNpc = content.npcEvaluations.filter((e) => e.tagId != null);
-  const npcDone = taggedNpc.length > 0 ? taggedNpc.length : content.npcEvaluations.length;
+  const npcDone = content.npcEvaluations.length;
   const npcLikeCount = content.npcEvaluations.filter((e) => e.value === "LIKE").length;
   const npcPassCount = content.npcEvaluations.filter((e) => e.value === "PASS").length;
   const humanLikeCount = content.votes.filter((v) => v.value === "LIKE").length;
@@ -57,17 +51,15 @@ export async function GET(
       likeRate: ct.likeRate,
     })),
     npcReview: {
-      total: expectedNpc,
+      total: NPC_JUDGE_COUNT,
       completed: npcDone,
       likeCount: npcLikeCount,
       passCount: npcPassCount,
       decisions:
-        content.status === "NPC_REVIEWING" && npcDone < expectedNpc
+        content.status === "NPC_REVIEWING" && npcDone < NPC_JUDGE_COUNT
           ? []
           : content.npcEvaluations.map((e) => ({
               judgeId: e.judgeId,
-              tagId: e.tagId,
-              tagSlug: e.tag?.slug ?? null,
               value: e.value,
               commentJa: e.commentJa,
               confidence: e.confidence,

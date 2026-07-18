@@ -31,8 +31,8 @@ export default async function ContentDetailPage({
     include: {
       user: { select: { username: true, name: true, image: true } },
       contentTags: { include: { tag: true }, orderBy: { createdAt: "asc" } },
-      npcEvaluations: { select: { value: true, tagId: true } },
-      votes: { select: { value: true, sourceTagId: true } },
+      npcEvaluations: { select: { value: true } },
+      votes: { select: { value: true } },
     },
   });
 
@@ -49,6 +49,11 @@ export default async function ContentDetailPage({
   const isOwner = session?.user?.id === content.userId;
   const publicOk = isPublicContentStatus(content.status);
   const imageKey = content.largeObjectKey ?? content.mediumObjectKey ?? content.thumbnailObjectKey;
+
+  const npcLikeCount = content.npcEvaluations.filter((e) => e.value === "LIKE").length;
+  const npcPassCount = content.npcEvaluations.filter((e) => e.value === "PASS").length;
+  const humanLikeCount = content.votes.filter((v) => v.value === "LIKE").length;
+  const humanPassCount = content.votes.filter((v) => v.value === "PASS").length;
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-2xl">
@@ -79,31 +84,16 @@ export default async function ContentDetailPage({
           {getContentStatusHint(content.status) && ` — ${getContentStatusHint(content.status)}`}
         </p>
       )}
-      {(isOwner || session?.user) && (
-        <div className="mt-3 space-y-2">
-          <p className="text-sm font-medium tabular-nums">総LIKE数 {content.likeCount}</p>
-          {content.contentTags.length > 0 && (
-            <ul className="space-y-1 text-sm text-[var(--muted-foreground)]">
-              {content.contentTags.map((ct) => {
-                const tagNpc = content.npcEvaluations.filter((e) => e.tagId === ct.tagId);
-                const tagHuman = content.votes.filter((v) => v.sourceTagId === ct.tagId);
-                const npcLike = tagNpc.filter((e) => e.value === "LIKE").length;
-                const npcPass = tagNpc.filter((e) => e.value === "PASS").length;
-                const humanLike = tagHuman.filter((v) => v.value === "LIKE").length;
-                const humanPass = tagHuman.filter((v) => v.value === "PASS").length;
-                return (
-                  <li key={ct.id}>
-                    #{ct.tag.slug} LIKE率 {(ct.likeRate * 100).toFixed(1)}% · {ct.voteCount}票
-                    {isOwner && (
-                      <span>
-                        {" "}
-                        （NPC {npcLike}/{npcLike + npcPass} · 人間 {humanLike}/{humanLike + humanPass}）
-                      </span>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
+      {(isOwner || session?.user) && content.voteCount > 0 && (
+        <div className="mt-3 space-y-1">
+          <p className="text-sm tabular-nums">
+            LIKE率 {(content.likeRate * 100).toFixed(1)}% · {content.voteCount} 票
+          </p>
+          {isOwner && (
+            <p className="text-xs text-[var(--muted-foreground)]">
+              NPC {npcLikeCount}LIKE / {npcPassCount}PASS · 人間 {humanLikeCount}LIKE /{" "}
+              {humanPassCount}PASS
+            </p>
           )}
         </div>
       )}

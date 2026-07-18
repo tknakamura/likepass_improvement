@@ -2,8 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import {
-  buildVotedPairSet,
-  pairKey,
+  buildVotedSet,
   selectNextPair,
   type QueuePair,
 } from "@/server/services/evaluation/queue";
@@ -30,7 +29,7 @@ export async function GET(request: Request) {
   const [votes, preferences, pairCandidates] = await Promise.all([
     prisma.vote.findMany({
       where: { userId: session.user.id },
-      select: { contentId: true, sourceTagId: true },
+      select: { contentId: true },
     }),
     prisma.userTagPreference.findMany({ where: { userId: session.user.id } }),
     prisma.contentTag.findMany({
@@ -70,10 +69,8 @@ export async function GET(request: Request) {
   const selected = selectNextPair(candidates, {
     userId: session.user.id,
     preferences,
-    votedPairKeys: buildVotedPairSet(votes),
-    sessionHistory: impressions
-      .filter((i) => i.tagId)
-      .map((i) => pairKey(i.contentId, i.tagId!)),
+    votedContentIds: buildVotedSet(votes),
+    sessionHistory: impressions.map((i) => i.contentId),
     tagSlugs: uniqueTagSlugs.length > 0 ? uniqueTagSlugs : undefined,
   });
 

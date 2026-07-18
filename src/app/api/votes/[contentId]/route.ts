@@ -7,10 +7,19 @@ import { enqueueJob } from "@/lib/jobs";
 
 const schema = z.object({
   value: z.enum(["LIKE", "PASS"]),
-  sourceTagId: z.string().min(1),
 });
 
 const UNDO_WINDOW_MS = 5000;
+
+async function enqueueTagRankings(contentId: string) {
+  const tags = await prisma.contentTag.findMany({
+    where: { contentId, status: { not: "REMOVED" } },
+    select: { tagId: true },
+  });
+  for (const { tagId } of tags) {
+    await enqueueJob("recalculate_ranking", { tagId });
+  }
+}
 
 export async function PATCH(
   request: Request,
@@ -30,10 +39,9 @@ export async function PATCH(
 
   const existing = await prisma.vote.findUnique({
     where: {
-      userId_contentId_sourceTagId: {
+      userId_contentId: {
         userId: session.user.id,
         contentId,
-        sourceTagId: parsed.data.sourceTagId,
       },
     },
   });
@@ -59,13 +67,13 @@ export async function PATCH(
   });
 
   await updateVoteAggregates(contentId);
-  await enqueueJob("recalculate_ranking", { tagId: parsed.data.sourceTagId });
+  await enqueueTagRankings(contentId);
 
   return NextResponse.json({ vote });
 }
 
 export async function DELETE(
-  request: Request,
+  _request: Request,
   { params }: { params: Promise<{ contentId: string }> },
 ) {
   const session = await auth();
@@ -74,24 +82,12 @@ export async function DELETE(
   }
 
   const { contentId } = await params;
-  let sourceTagId: string | undefined;
-  try {
-    const body = await request.json();
-    sourceTagId = typeof body?.sourceTagId === "string" ? body.sourceTagId : undefined;
-  } catch {
-    sourceTagId = undefined;
-  }
-
-  if (!sourceTagId) {
-    return NextResponse.json({ error: "sourceTagId is required" }, { status: 400 });
-  }
 
   const existing = await prisma.vote.findUnique({
     where: {
-      userId_contentId_sourceTagId: {
+      userId_contentId: {
         userId: session.user.id,
         contentId,
-        sourceTagId,
       },
     },
   });
@@ -109,7 +105,7 @@ export async function DELETE(
 
   await prisma.vote.delete({ where: { id: existing.id } });
   await updateVoteAggregates(contentId);
-  await enqueueJob("recalculate_ranking", { tagId: sourceTagId });
+  await enqueueTagRankings(contentId);
 
   return NextResponse.json({ success: true });
 }

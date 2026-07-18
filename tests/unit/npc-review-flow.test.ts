@@ -6,7 +6,6 @@ const contentUpdate = vi.fn();
 const npcUpsert = vi.fn();
 const npcCount = vi.fn();
 const contentTagUpdateMany = vi.fn();
-const contentTagFindMany = vi.fn();
 const contentFindUnique = vi.fn();
 const npcJudgeFindMany = vi.fn();
 const transaction = vi.fn();
@@ -28,7 +27,6 @@ vi.mock("@/lib/db", () => ({
     },
     contentTag: {
       updateMany: (...args: unknown[]) => contentTagUpdateMany(...args),
-      findMany: (...args: unknown[]) => contentTagFindMany(...args),
     },
     $transaction: (fn: (tx: unknown) => Promise<unknown>) => transaction(fn),
   },
@@ -63,16 +61,16 @@ describe("runNpcReview", () => {
     npcUpsert.mockResolvedValue({});
     contentUpdate.mockResolvedValue({});
     recomputeVoteAggregates.mockResolvedValue({
-      likeCount: 10,
-      passCount: 10,
-      voteCount: 20,
+      likeCount: 5,
+      passCount: 5,
+      voteCount: 10,
     });
     recalculateTagRanking.mockResolvedValue(undefined);
     transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
       const tx = {
         npcEvaluation: {
           upsert: npcUpsert,
-          count: async () => NPC_JUDGE_COUNT * 2,
+          count: async () => NPC_JUDGE_COUNT,
         },
         content: { update: contentUpdate },
         contentTag: { updateMany: contentTagUpdateMany },
@@ -81,7 +79,7 @@ describe("runNpcReview", () => {
     });
   });
 
-  it("persists per-tag panel decisions and publishes to EXPLORING", async () => {
+  it("persists 10 photo-level decisions and publishes to EXPLORING", async () => {
     contentFindUnique
       .mockResolvedValueOnce({
         id: "c1",
@@ -93,12 +91,8 @@ describe("runNpcReview", () => {
         originalObjectKey: null,
         mimeType: "image/jpeg",
         contentTags: [
-          { tagId: "tag-child", status: "PENDING", tag: { slug: "child", displayName: "子ども" } },
-          {
-            tagId: "tag-interior",
-            status: "PENDING",
-            tag: { slug: "interior", displayName: "インテリア" },
-          },
+          { tagId: "tag-child" },
+          { tagId: "tag-interior" },
         ],
       })
       .mockResolvedValueOnce({
@@ -113,13 +107,12 @@ describe("runNpcReview", () => {
     const { runNpcReview } = await import("@/server/services/npc/review");
     await runNpcReview("c1");
 
-    expect(npcUpsert).toHaveBeenCalledTimes(NPC_JUDGE_COUNT * 2);
+    expect(npcUpsert).toHaveBeenCalledTimes(NPC_JUDGE_COUNT);
     expect(npcUpsert).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
-          contentId_judgeId_tagId: expect.objectContaining({
+          contentId_judgeId: expect.objectContaining({
             contentId: "c1",
-            tagId: "tag-child",
           }),
         },
       }),
@@ -134,15 +127,13 @@ describe("runNpcReview", () => {
     expect(recalculateTagRanking).toHaveBeenCalledWith("tag-interior");
   });
 
-  it("is a no-op when already published with a full tag-scoped panel", async () => {
+  it("is a no-op when already published with a full panel", async () => {
     contentFindUnique.mockResolvedValueOnce({
       id: "c1",
       status: "EXPLORING",
       aiSafetyStatus: "SAFE",
       publishedAt: new Date(),
-      contentTags: [
-        { tagId: "tag-child", status: "PENDING", tag: { slug: "child", displayName: "子ども" } },
-      ],
+      contentTags: [{ tagId: "tag-child" }],
     });
     npcCount.mockResolvedValueOnce(NPC_JUDGE_COUNT);
 
@@ -153,7 +144,7 @@ describe("runNpcReview", () => {
     expect(transaction).not.toHaveBeenCalled();
   });
 
-  it("backfills tag-scoped NPC votes for EXPLORING content missing them", async () => {
+  it("backfills photo-level NPC votes for EXPLORING content missing them", async () => {
     contentFindUnique
       .mockResolvedValueOnce({
         id: "c1",
@@ -164,9 +155,7 @@ describe("runNpcReview", () => {
         largeObjectKey: null,
         originalObjectKey: null,
         mimeType: "image/jpeg",
-        contentTags: [
-          { tagId: "tag-child", status: "PENDING", tag: { slug: "child", displayName: "子ども" } },
-        ],
+        contentTags: [{ tagId: "tag-child" }],
       })
       .mockResolvedValueOnce({
         id: "c1",
@@ -176,22 +165,16 @@ describe("runNpcReview", () => {
         mimeType: "image/jpeg",
       });
     npcCount.mockResolvedValueOnce(0);
-    transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
-      const tx = {
-        npcEvaluation: {
-          upsert: npcUpsert,
-          count: async () => NPC_JUDGE_COUNT,
-        },
-        content: { update: contentUpdate },
-        contentTag: { updateMany: contentTagUpdateMany },
-      };
-      return fn(tx);
-    });
 
     const { runNpcReview } = await import("@/server/services/npc/review");
     await runNpcReview("c1");
 
     expect(npcUpsert).toHaveBeenCalledTimes(NPC_JUDGE_COUNT);
+    expect(contentUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "EXPLORING" }),
+      }),
+    );
   });
 
   it("does not run for PROCESSING content", async () => {
@@ -200,9 +183,7 @@ describe("runNpcReview", () => {
       status: "PROCESSING",
       aiSafetyStatus: "SAFE",
       publishedAt: null,
-      contentTags: [
-        { tagId: "tag-child", status: "PENDING", tag: { slug: "child", displayName: "子ども" } },
-      ],
+      contentTags: [{ tagId: "tag-child" }],
     });
     npcCount.mockResolvedValueOnce(0);
 
@@ -214,15 +195,10 @@ describe("runNpcReview", () => {
 });
 
 describe("MockNpcReviewProvider uniqueness", () => {
-  it("covers every seeded judge id exactly once per tag", async () => {
+  it("covers every seeded judge id exactly once", async () => {
     const provider = new MockNpcReviewProvider();
-    const result = await provider.review(Buffer.from("x"), "image/jpeg", SEED_NPC_JUDGES, {
-      id: "tag1",
-      slug: "child",
-      displayName: "子ども",
-    });
+    const result = await provider.review(Buffer.from("x"), "image/jpeg", SEED_NPC_JUDGES);
     const ids = result.decisions.map((d) => d.judgeId).sort();
     expect(ids).toEqual([...SEED_NPC_JUDGES.map((j) => j.id)].sort());
-    expect(result.decisions.every((d) => d.tagId === "tag1")).toBe(true);
   });
 });
