@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { SiteHeader } from "@/components/layout/site-header";
@@ -22,6 +22,10 @@ export const metadata: Metadata = {
   manifest: "/manifest.json",
 };
 
+export const viewport: Viewport = {
+  viewportFit: "cover",
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -33,7 +37,7 @@ export default function RootLayout({
         <AuthSessionProvider>
           <SiteHeader />
           <GlobalNav />
-          <main className="flex-1">{children}</main>
+          <main className="flex-1 pb-16 md:pb-0">{children}</main>
           <SiteFooter />
         </AuthSessionProvider>
       </body>
