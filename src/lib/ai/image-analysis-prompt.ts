@@ -12,8 +12,10 @@ const CATEGORY_GUIDE = `Tag categories (use exactly one per tag):
 - LOCATION: identifiable region or city only when clearly visible (tokyo, kyoto, japan)`;
 
 const SELECTION_RULES = `Selection rules:
-- Return 1 to 5 tags that are visually evident in the photo
-- You MUST return at least 1 tag; never return an empty tags array
+- Return 1 to 3 tags that describe what is visually evident in the photograph
+- You MUST return at least 1 content tag; never return an empty tags array
+- Tag the photo's content (subject, scene, style, attribute, location) — not the medium itself
+- NEVER use generic media-type tags such as: photo, image, picture, photography, pic, snapshot, shot
 - Prefer specific, concrete tags over vague ones (use "street" not "urban life")
 - Use lowercase single-word English slugs (a-z0-9 only, no spaces or hyphens)
 - Normalize synonyms (nighttime -> night, urban -> city, puppy -> dog)
@@ -39,7 +41,7 @@ export function buildImageAnalysisUserPrompt(knownTags: KnownTagHint[] = []): st
           .join("\n")}\nYou may still propose a new slug if none fit, but only when visually justified.`
       : "";
 
-  return `Analyze this photograph for LIKEPASS.${knownSection}
+  return `Analyze this photograph for LIKEPASS. Return up to 3 content tags.${knownSection}
 
 Return JSON only with this shape:
 {

@@ -1,7 +1,8 @@
 import sharp from "sharp";
 import {
   type ImageAnalysisResult,
-  createSafeFallbackResult,
+  ImageAnalysisError,
+  MAX_AI_TAGS,
   parseImageAnalysisResponse,
 } from "@/lib/ai/image-analysis-schema";
 import {
@@ -17,6 +18,8 @@ export type {
   ImageAnalysisResult,
   TagCategory,
 } from "@/lib/ai/image-analysis-schema";
+
+export { ImageAnalysisError, MAX_AI_TAGS } from "@/lib/ai/image-analysis-schema";
 
 export interface ImageAnalysisContext {
   knownTags?: KnownTagHint[];
@@ -41,12 +44,10 @@ export class MockImageAnalysisProvider implements ImageAnalysisProvider {
   ): Promise<ImageAnalysisResult> {
     return {
       tags: [
-        { name: "street", confidence: 0.92, category: "SCENE" },
-        { name: "night", confidence: 0.88, category: "ATTRIBUTE" },
-        { name: "tokyo", confidence: 0.85, category: "LOCATION" },
-        { name: "neon", confidence: 0.8, category: "STYLE" },
-        { name: "city", confidence: 0.78, category: "SUBJECT" },
-      ],
+        { name: "street", confidence: 0.92, category: "SCENE" as const },
+        { name: "night", confidence: 0.88, category: "ATTRIBUTE" as const },
+        { name: "tokyo", confidence: 0.85, category: "LOCATION" as const },
+      ].slice(0, MAX_AI_TAGS),
       quality: { blur: 0.05, aesthetic: 0.81, textDominance: 0.02 },
       safety: { status: "SAFE", reasons: [] },
       aiGeneratedLikelihood: 0.1,
@@ -151,7 +152,7 @@ export class OpenAIImageAnalysisProvider implements ImageAnalysisProvider {
       if (!response.ok) {
         const errorBody = await response.text();
         console.error("[image-analysis] OpenAI API error", response.status, errorBody.slice(0, 500));
-        return createSafeFallbackResult("openai_api_error");
+        throw new ImageAnalysisError("openai_api_error", `OpenAI API returned ${response.status}`);
       }
 
       const data = await response.json();
@@ -160,25 +161,31 @@ export class OpenAIImageAnalysisProvider implements ImageAnalysisProvider {
 
       if (message?.refusal) {
         console.warn("[image-analysis] OpenAI refusal:", message.refusal);
-        return createSafeFallbackResult("openai_refusal");
+        throw new ImageAnalysisError("openai_refusal", String(message.refusal));
       }
 
       if (!text.trim()) {
         console.warn("[image-analysis] OpenAI returned empty content");
-        return createSafeFallbackResult("empty_response");
+        throw new ImageAnalysisError("empty_response");
       }
 
       const raw = extractJsonObject(text);
       const parsed = parseImageAnalysisResponse(raw);
       if (!parsed) {
-        console.warn("[image-analysis] Unparseable OpenAI response, using fallback:", text.slice(0, 300));
-        return createSafeFallbackResult("parse_error");
+        console.warn("[image-analysis] Unparseable or empty-tag OpenAI response:", text.slice(0, 300));
+        throw new ImageAnalysisError("parse_error");
       }
 
       return parsed;
     } catch (error) {
+      if (error instanceof ImageAnalysisError) {
+        throw error;
+      }
       console.error("[image-analysis] OpenAI request failed", error);
-      return createSafeFallbackResult("openai_request_failed");
+      throw new ImageAnalysisError(
+        "openai_request_failed",
+        error instanceof Error ? error.message : "Unknown OpenAI request error",
+      );
     }
   }
 }

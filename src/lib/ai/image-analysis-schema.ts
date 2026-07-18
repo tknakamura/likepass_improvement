@@ -3,6 +3,23 @@ import { z } from "zod";
 export const TAG_CATEGORIES = ["SUBJECT", "SCENE", "STYLE", "ATTRIBUTE", "LOCATION"] as const;
 export type TagCategory = (typeof TAG_CATEGORIES)[number];
 
+export const MAX_AI_TAGS = 3;
+
+/** Media-type / generic slugs that never describe photo content. */
+export const GENERIC_TAG_SLUGS = new Set([
+  "photo",
+  "image",
+  "picture",
+  "photography",
+  "pic",
+  "pics",
+  "snapshot",
+  "shot",
+  "photograph",
+  "foto",
+  "img",
+]);
+
 export interface TagSuggestion {
   name: string;
   confidence: number;
@@ -103,6 +120,10 @@ export function normalizeTagSlug(name: string): string {
   return TAG_SYNONYMS[compact] ?? compact;
 }
 
+export function isGenericTagSlug(slug: string): boolean {
+  return GENERIC_TAG_SLUGS.has(slug);
+}
+
 function normalizeCategory(value: string | undefined): TagCategory {
   const upper = (value ?? "SUBJECT").trim().toUpperCase();
   if ((TAG_CATEGORIES as readonly string[]).includes(upper)) {
@@ -140,7 +161,7 @@ function dedupeTags(tags: TagSuggestion[]): TagSuggestion[] {
   const bySlug = new Map<string, TagSuggestion>();
   for (const tag of tags) {
     const slug = normalizeTagSlug(tag.name);
-    if (!slug) continue;
+    if (!slug || isGenericTagSlug(slug)) continue;
     const normalized = { ...tag, name: slug };
     const existing = bySlug.get(slug);
     if (!existing || normalized.confidence > existing.confidence) {
@@ -158,7 +179,7 @@ export function parseImageAnalysisResponse(raw: unknown): ImageAnalysisResult | 
     (parsed.data.tags ?? [])
       .map((tag) => {
         const slug = normalizeTagSlug(tag.name);
-        if (!slug || slug.length < 2) return null;
+        if (!slug || slug.length < 2 || isGenericTagSlug(slug)) return null;
         return {
           name: slug,
           confidence: clamp01(parseMetric(tag.confidence, 0.7)),
@@ -166,20 +187,18 @@ export function parseImageAnalysisResponse(raw: unknown): ImageAnalysisResult | 
         };
       })
       .filter((tag): tag is TagSuggestion => tag !== null),
-  ).slice(0, 5);
-
-  const resolvedTags =
-    tags.length > 0 ? tags : [{ name: "photo", confidence: 0.6, category: "SUBJECT" as TagCategory }];
+  ).slice(0, MAX_AI_TAGS);
 
   if (tags.length === 0) {
-    console.warn("[image-analysis] OpenAI returned zero tags; using fallback tag");
+    console.warn("[image-analysis] OpenAI returned zero usable content tags");
+    return null;
   }
 
   const quality = parsed.data.quality ?? {};
   const safety = parsed.data.safety ?? {};
 
   return {
-    tags: resolvedTags,
+    tags,
     quality: {
       blur: parseMetric(quality.blur, 0.1),
       aesthetic: parseMetric(quality.aesthetic, 0.5),
@@ -193,16 +212,12 @@ export function parseImageAnalysisResponse(raw: unknown): ImageAnalysisResult | 
   };
 }
 
-export function createSafeFallbackResult(reason: string): ImageAnalysisResult {
-  return {
-    tags: [{ name: "photo", confidence: 0.6, category: "SUBJECT" }],
-    quality: { blur: 0.1, aesthetic: 0.5, textDominance: 0.02 },
-    safety: { status: "SAFE", reasons: [reason] },
-    aiGeneratedLikelihood: 0.1,
-  };
-}
-
-/** @deprecated Use createSafeFallbackResult for recoverable analysis failures */
-export function createReviewRequiredResult(reason: string): ImageAnalysisResult {
-  return createSafeFallbackResult(reason);
+export class ImageAnalysisError extends Error {
+  constructor(
+    public readonly reason: string,
+    message?: string,
+  ) {
+    super(message ?? `Image analysis failed: ${reason}`);
+    this.name = "ImageAnalysisError";
+  }
 }
