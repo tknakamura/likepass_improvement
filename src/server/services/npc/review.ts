@@ -4,7 +4,11 @@ import { readLocalImage } from "@/lib/local-images";
 import { getNpcReviewProvider, NPC_REVIEW_PROMPT_VERSION } from "@/lib/ai/npc-review";
 import { NPC_JUDGE_COUNT } from "@/lib/seed/data";
 import { recomputeVoteAggregates, recalculateTagRanking } from "@/server/services/content/aggregates";
-import type { NpcJudgeProfile } from "@/lib/ai/npc-review-schema";
+import type {
+  NpcJudgeProfile,
+  NpcReviewResult,
+  NpcTagContext,
+} from "@/lib/ai/npc-review-schema";
 
 async function loadActiveJudges(): Promise<NpcJudgeProfile[]> {
   const judges = await prisma.npcJudge.findMany({
@@ -44,16 +48,34 @@ async function loadImageBuffer(contentId: string): Promise<{ buffer: Buffer; mim
 }
 
 /**
- * Runs the world NPC panel review, upserts all decisions atomically,
- * recomputes aggregates, and publishes to EXPLORING.
+ * Runs the world NPC panel review per ContentTag, upserts all decisions,
+ * recomputes aggregates, and publishes to EXPLORING when every tag×judge is saved.
  */
 export async function runNpcReview(contentId: string): Promise<void> {
-  const content = await prisma.content.findUnique({ where: { id: contentId } });
+  const content = await prisma.content.findUnique({
+    where: { id: contentId },
+    include: {
+      contentTags: {
+        where: { status: { not: "REMOVED" } },
+        include: { tag: true },
+      },
+    },
+  });
   if (!content) return;
 
-  const existingCount = await prisma.npcEvaluation.count({ where: { contentId } });
+  const tags = content.contentTags;
+  if (tags.length === 0) {
+    await markNpcReviewFailed(contentId, "no_tags");
+    return;
+  }
+
+  const expectedCount = NPC_JUDGE_COUNT * tags.length;
+  const taggedEvalCount = await prisma.npcEvaluation.count({
+    where: { contentId, tagId: { not: null } },
+  });
+
   if (
-    existingCount >= NPC_JUDGE_COUNT &&
+    taggedEvalCount >= expectedCount &&
     ["EXPLORING", "ACTIVE", "DORMANT"].includes(content.status)
   ) {
     return;
@@ -71,36 +93,56 @@ export async function runNpcReview(contentId: string): Promise<void> {
   const judges = await loadActiveJudges();
   const { buffer, mimeType } = await loadImageBuffer(contentId);
   const provider = getNpcReviewProvider();
-  const result = await provider.review(buffer, mimeType, judges);
+
+  const tagContexts: NpcTagContext[] = tags.map((ct) => ({
+    id: ct.tagId,
+    slug: ct.tag.slug,
+    displayName: ct.tag.displayName,
+  }));
+
+  const panelResults: Array<{ tag: NpcTagContext; result: NpcReviewResult }> = [];
+  for (const tag of tagContexts) {
+    const result = await provider.review(buffer, mimeType, judges, tag);
+    panelResults.push({ tag, result });
+  }
 
   await prisma.$transaction(async (tx) => {
-    for (const decision of result.decisions) {
-      await tx.npcEvaluation.upsert({
-        where: {
-          contentId_judgeId: { contentId, judgeId: decision.judgeId },
-        },
-        create: {
-          contentId,
-          judgeId: decision.judgeId,
-          value: decision.value,
-          commentJa: decision.commentJa,
-          confidence: decision.confidence,
-          modelName: result.modelName,
-          promptVersion: result.promptVersion ?? NPC_REVIEW_PROMPT_VERSION,
-        },
-        update: {
-          value: decision.value,
-          commentJa: decision.commentJa,
-          confidence: decision.confidence,
-          modelName: result.modelName,
-          promptVersion: result.promptVersion ?? NPC_REVIEW_PROMPT_VERSION,
-        },
-      });
+    for (const { tag, result } of panelResults) {
+      for (const decision of result.decisions) {
+        await tx.npcEvaluation.upsert({
+          where: {
+            contentId_judgeId_tagId: {
+              contentId,
+              judgeId: decision.judgeId,
+              tagId: tag.id,
+            },
+          },
+          create: {
+            contentId,
+            judgeId: decision.judgeId,
+            tagId: tag.id,
+            value: decision.value,
+            commentJa: decision.commentJa,
+            confidence: decision.confidence,
+            modelName: result.modelName,
+            promptVersion: result.promptVersion ?? NPC_REVIEW_PROMPT_VERSION,
+          },
+          update: {
+            value: decision.value,
+            commentJa: decision.commentJa,
+            confidence: decision.confidence,
+            modelName: result.modelName,
+            promptVersion: result.promptVersion ?? NPC_REVIEW_PROMPT_VERSION,
+          },
+        });
+      }
     }
 
-    const saved = await tx.npcEvaluation.count({ where: { contentId } });
-    if (saved < NPC_JUDGE_COUNT) {
-      throw new Error(`Incomplete NPC panel after save: ${saved}/${NPC_JUDGE_COUNT}`);
+    const saved = await tx.npcEvaluation.count({
+      where: { contentId, tagId: { not: null } },
+    });
+    if (saved < expectedCount) {
+      throw new Error(`Incomplete NPC panel after save: ${saved}/${expectedCount}`);
     }
 
     await tx.content.update({
@@ -119,12 +161,13 @@ export async function runNpcReview(contentId: string): Promise<void> {
     await recomputeVoteAggregates(contentId, tx);
   });
 
-  const tags = await prisma.contentTag.findMany({ where: { contentId }, select: { tagId: true } });
   for (const { tagId } of tags) {
     await recalculateTagRanking(tagId);
   }
 
-  console.log(`[npc_review_image] ${contentId} -> EXPLORING (${result.decisions.length} judges)`);
+  console.log(
+    `[npc_review_image] ${contentId} -> EXPLORING (${expectedCount} tag-scoped judge votes across ${tags.length} tags)`,
+  );
 }
 
 export async function markNpcReviewFailed(contentId: string, reason: string) {

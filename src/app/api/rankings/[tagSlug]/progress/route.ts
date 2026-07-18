@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 
 export async function GET(
   _request: Request,
-  { params }: { params: Promise<{ tagSlug: string }> }
+  { params }: { params: Promise<{ tagSlug: string }> },
 ) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -17,7 +17,7 @@ export async function GET(
 
   const [votedIds, totalEligible] = await Promise.all([
     prisma.vote.findMany({
-      where: { userId: session.user.id },
+      where: { userId: session.user.id, sourceTagId: tag.id },
       select: { contentId: true },
     }),
     prisma.contentTag.count({

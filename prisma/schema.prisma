@@ -251,23 +251,27 @@ model NpcJudge {
 }
 
 model NpcEvaluation {
-  id           String    @id @default(cuid())
-  contentId    String
-  judgeId      String
-  value        VoteValue
-  commentJa    String    @db.Text
-  confidence   Float?
-  modelName    String?
+  id            String    @id @default(cuid())
+  contentId     String
+  judgeId       String
+  tagId         String?
+  value         VoteValue
+  commentJa     String    @db.Text
+  confidence    Float?
+  modelName     String?
   promptVersion String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   content Content  @relation(fields: [contentId], references: [id], onDelete: Cascade)
   judge   NpcJudge @relation(fields: [judgeId], references: [id], onDelete: Cascade)
+  tag     Tag?     @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
-  @@unique([contentId, judgeId])
+  @@unique([contentId, judgeId, tagId])
   @@index([contentId])
   @@index([judgeId])
+  @@index([tagId])
+  @@index([contentId, tagId])
 }
 
 model Tag {
@@ -281,12 +285,14 @@ model Tag {
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 
-  parentTag       Tag?              @relation("TagHierarchy", fields: [parentTagId], references: [id])
-  childTags       Tag[]             @relation("TagHierarchy")
-  contentTags     ContentTag[]
-  impressions     Impression[]
-  preferences     UserTagPreference[]
+  parentTag        Tag?               @relation("TagHierarchy", fields: [parentTagId], references: [id])
+  childTags        Tag[]              @relation("TagHierarchy")
+  contentTags      ContentTag[]
+  impressions      Impression[]
+  preferences      UserTagPreference[]
   rankingSnapshots RankingSnapshot[]
+  votes            Vote[]
+  npcEvaluations   NpcEvaluation[]
 
   @@index([category])
   @@index([usageCount])
@@ -302,6 +308,8 @@ model ContentTag {
   likeCount     Int              @default(0)
   passCount     Int              @default(0)
   voteCount     Int              @default(0)
+  likeRate      Float            @default(0)
+  wilsonLower   Float            @default(0)
   rankingScore  Float            @default(0)
   currentRank   Int?
   previousRank  Int?
@@ -329,12 +337,15 @@ model Vote {
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  content Content @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content   Content @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  sourceTag Tag?    @relation(fields: [sourceTagId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, contentId])
+  @@unique([userId, contentId, sourceTagId])
   @@index([contentId])
   @@index([userId])
+  @@index([sourceTagId])
+  @@index([contentId, sourceTagId])
 }
 
 model Impression {

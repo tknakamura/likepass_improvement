@@ -9,12 +9,32 @@ import { enqueueJob } from "@/lib/jobs";
 const schema = z.object({
   contentId: z.string(),
   value: z.enum(["LIKE", "PASS"]),
-  sourceTagId: z.string().optional(),
+  sourceTagId: z.string().min(1),
   sessionId: z.string().optional(),
   responseTimeMs: z.number().optional(),
 });
 
+const undoSchema = z.object({
+  contentId: z.string(),
+  sourceTagId: z.string().min(1),
+});
+
 const UNDO_WINDOW_MS = 5000;
+
+async function assertEvaluableTag(contentId: string, sourceTagId: string) {
+  const contentTag = await prisma.contentTag.findUnique({
+    where: { contentId_tagId: { contentId, tagId: sourceTagId } },
+    include: { tag: true, content: true },
+  });
+
+  if (!contentTag || contentTag.status === "REMOVED") {
+    return null;
+  }
+  if (!["EXPLORING", "ACTIVE"].includes(contentTag.content.status)) {
+    return null;
+  }
+  return contentTag;
+}
 
 export async function POST(request: Request) {
   const session = await auth();
@@ -28,16 +48,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid vote" }, { status: 400 });
   }
 
-  const content = await prisma.content.findUnique({ where: { id: parsed.data.contentId } });
-  if (!content || !["EXPLORING", "ACTIVE"].includes(content.status)) {
+  const contentTag = await assertEvaluableTag(parsed.data.contentId, parsed.data.sourceTagId);
+  if (!contentTag) {
     return NextResponse.json({ error: "Content not available" }, { status: 404 });
   }
 
   const existing = await prisma.vote.findUnique({
     where: {
-      userId_contentId: {
+      userId_contentId_sourceTagId: {
         userId: session.user.id,
         contentId: parsed.data.contentId,
+        sourceTagId: parsed.data.sourceTagId,
       },
     },
   });
@@ -57,7 +78,7 @@ export async function POST(request: Request) {
     },
   });
 
-  await updateVoteAggregates(parsed.data.contentId, undefined, parsed.data.value);
+  await updateVoteAggregates(parsed.data.contentId);
 
   if (parsed.data.sessionId) {
     await prisma.impression.create({
@@ -72,27 +93,40 @@ export async function POST(request: Request) {
     });
   }
 
-  const updated = await prisma.content.findUnique({ where: { id: parsed.data.contentId } });
-  const tagIds = await prisma.contentTag.findMany({
-    where: { contentId: parsed.data.contentId },
-    select: { tagId: true },
+  const updatedTag = await prisma.contentTag.findUnique({
+    where: {
+      contentId_tagId: {
+        contentId: parsed.data.contentId,
+        tagId: parsed.data.sourceTagId,
+      },
+    },
   });
-  for (const { tagId } of tagIds) {
-    await enqueueJob("recalculate_ranking", { tagId });
-  }
+
+  await enqueueJob("recalculate_ranking", { tagId: parsed.data.sourceTagId });
 
   const unlockedRankings = await getUnlockedRankingsForVote(
     session.user.id,
-    parsed.data.contentId
+    parsed.data.contentId,
+    parsed.data.sourceTagId,
   );
 
   return NextResponse.json({
-    vote: { contentId: vote.contentId, value: vote.value, undoUntil: Date.now() + UNDO_WINDOW_MS },
+    vote: {
+      contentId: vote.contentId,
+      sourceTagId: vote.sourceTagId,
+      value: vote.value,
+      undoUntil: Date.now() + UNDO_WINDOW_MS,
+    },
     result: {
-      likeCount: updated?.likeCount ?? 0,
-      passCount: updated?.passCount ?? 0,
-      likeRate: updated?.likeRate ?? 0,
-      rankingStatus: updated?.status ?? "EXPLORING",
+      likeCount: updatedTag?.likeCount ?? 0,
+      passCount: updatedTag?.passCount ?? 0,
+      likeRate: updatedTag?.likeRate ?? 0,
+      rankingStatus: updatedTag?.status ?? "PENDING",
+      tag: {
+        id: contentTag.tag.id,
+        slug: contentTag.tag.slug,
+        displayName: contentTag.tag.displayName,
+      },
     },
     unlockedRankings,
     next: { prefetch: true },
@@ -113,9 +147,10 @@ export async function PATCH(request: Request) {
 
   const existing = await prisma.vote.findUnique({
     where: {
-      userId_contentId: {
+      userId_contentId_sourceTagId: {
         userId: session.user.id,
         contentId: parsed.data.contentId,
+        sourceTagId: parsed.data.sourceTagId,
       },
     },
   });
@@ -135,8 +170,6 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ vote: existing });
   }
 
-  await updateVoteAggregates(parsed.data.contentId, existing.value, parsed.data.value);
-
   const vote = await prisma.vote.update({
     where: { id: existing.id },
     data: {
@@ -145,12 +178,11 @@ export async function PATCH(request: Request) {
     },
   });
 
+  await updateVoteAggregates(parsed.data.contentId);
+  await enqueueJob("recalculate_ranking", { tagId: parsed.data.sourceTagId });
+
   return NextResponse.json({ vote });
 }
-
-const undoSchema = z.object({
-  contentId: z.string(),
-});
 
 export async function DELETE(request: Request) {
   const session = await auth();
@@ -166,9 +198,10 @@ export async function DELETE(request: Request) {
 
   const existing = await prisma.vote.findUnique({
     where: {
-      userId_contentId: {
+      userId_contentId_sourceTagId: {
         userId: session.user.id,
         contentId: parsed.data.contentId,
+        sourceTagId: parsed.data.sourceTagId,
       },
     },
   });
@@ -184,8 +217,9 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Undo window expired" }, { status: 403 });
   }
 
-  await updateVoteAggregates(parsed.data.contentId, existing.value, undefined);
   await prisma.vote.delete({ where: { id: existing.id } });
+  await updateVoteAggregates(parsed.data.contentId);
+  await enqueueJob("recalculate_ranking", { tagId: parsed.data.sourceTagId });
 
   return NextResponse.json({ success: true });
 }

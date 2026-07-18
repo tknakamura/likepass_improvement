@@ -1,112 +1,196 @@
 import { describe, it, expect } from "vitest";
-import { selectNextContent, isExcludedFromQueue, buildVotedSet } from "@/server/services/evaluation/queue";
-import type { QueueCandidate } from "@/server/services/evaluation/queue";
+import {
+  selectNextPair,
+  isExcludedFromQueue,
+  buildVotedPairSet,
+  pairKey,
+  type QueuePair,
+} from "@/server/services/evaluation/queue";
+import type { Content, ContentTag, Tag } from "@prisma/client";
 
-function makeCandidate(overrides: Partial<QueueCandidate> & { id: string; userId: string }): QueueCandidate {
-  return {
-    status: "ACTIVE",
-    voteCount: 30,
-    wilsonLower: 0.6,
-    contentTags: [{ tag: { slug: "street", id: "t1" }, tagId: "t1", status: "ACTIVE" } as QueueCandidate["contentTags"][0]],
-    ...overrides,
-  } as QueueCandidate;
+function makePair(
+  overrides: {
+    contentId: string;
+    tagId: string;
+    userId: string;
+    contentStatus?: Content["status"];
+    tagStatus?: ContentTag["status"];
+    tagSlug?: string;
+    voteCount?: number;
+    wilsonLower?: number;
+  },
+): QueuePair {
+  const tag = {
+    id: overrides.tagId,
+    slug: overrides.tagSlug ?? "street",
+    displayName: overrides.tagSlug ?? "street",
+  } as Tag;
+
+  const contentTag = {
+    id: `ct-${overrides.contentId}-${overrides.tagId}`,
+    contentId: overrides.contentId,
+    tagId: overrides.tagId,
+    status: overrides.tagStatus ?? "ACTIVE",
+    voteCount: overrides.voteCount ?? 30,
+    wilsonLower: overrides.wilsonLower ?? 0.6,
+    tag,
+  } as ContentTag & { tag: Tag };
+
+  const content = {
+    id: overrides.contentId,
+    userId: overrides.userId,
+    status: overrides.contentStatus ?? "ACTIVE",
+    contentTags: [contentTag],
+  } as Content & { contentTags: (ContentTag & { tag: Tag })[] };
+
+  return { ...contentTag, content };
 }
 
 describe("isExcludedFromQueue", () => {
   it("excludes own posts", () => {
-    const c = makeCandidate({ id: "c1", userId: "u1" });
-    expect(isExcludedFromQueue(c, { userId: "u1", preferences: [], votedContentIds: new Set(), sessionHistory: [] })).toBe(true);
-  });
-
-  it("excludes voted content", () => {
-    const c = makeCandidate({ id: "c1", userId: "u2" });
+    const pair = makePair({ contentId: "c1", tagId: "t1", userId: "u1" });
     expect(
-      isExcludedFromQueue(c, {
+      isExcludedFromQueue(pair, {
         userId: "u1",
         preferences: [],
-        votedContentIds: new Set(["c1"]),
-        sessionHistory: [],
-      })
-    ).toBe(true);
-  });
-
-  it("excludes dormant", () => {
-    const c = makeCandidate({ id: "c1", userId: "u2", status: "DORMANT" });
-    expect(isExcludedFromQueue(c, { userId: "u1", preferences: [], votedContentIds: new Set(), sessionHistory: [] })).toBe(true);
-  });
-
-  it("excludes NPC_REVIEWING content", () => {
-    const c = makeCandidate({ id: "c1", userId: "u2", status: "NPC_REVIEWING" });
-    expect(
-      isExcludedFromQueue(c, {
-        userId: "u1",
-        preferences: [],
-        votedContentIds: new Set(),
+        votedPairKeys: new Set(),
         sessionHistory: [],
       }),
     ).toBe(true);
   });
 
-  it("excludes content without selected tags", () => {
-    const c = makeCandidate({
-      id: "c1",
-      userId: "u2",
-      contentTags: [{ tag: { slug: "street", id: "t1" }, tagId: "t1", status: "ACTIVE" } as QueueCandidate["contentTags"][0]],
-    });
+  it("excludes voted content×tag pairs only", () => {
+    const pair = makePair({ contentId: "c1", tagId: "t1", userId: "u2" });
     expect(
-      isExcludedFromQueue(c, {
+      isExcludedFromQueue(pair, {
         userId: "u1",
         preferences: [],
-        votedContentIds: new Set(),
+        votedPairKeys: new Set([pairKey("c1", "t1")]),
         sessionHistory: [],
-        tagSlugs: ["ramen"],
-      })
+      }),
+    ).toBe(true);
+
+    const otherTag = makePair({ contentId: "c1", tagId: "t2", userId: "u2", tagSlug: "child" });
+    expect(
+      isExcludedFromQueue(otherTag, {
+        userId: "u1",
+        preferences: [],
+        votedPairKeys: new Set([pairKey("c1", "t1")]),
+        sessionHistory: [],
+      }),
+    ).toBe(false);
+  });
+
+  it("excludes dormant content and tags", () => {
+    const dormantContent = makePair({
+      contentId: "c1",
+      tagId: "t1",
+      userId: "u2",
+      contentStatus: "DORMANT",
+    });
+    expect(
+      isExcludedFromQueue(dormantContent, {
+        userId: "u1",
+        preferences: [],
+        votedPairKeys: new Set(),
+        sessionHistory: [],
+      }),
+    ).toBe(true);
+
+    const dormantTag = makePair({
+      contentId: "c1",
+      tagId: "t1",
+      userId: "u2",
+      tagStatus: "DORMANT",
+    });
+    expect(
+      isExcludedFromQueue(dormantTag, {
+        userId: "u1",
+        preferences: [],
+        votedPairKeys: new Set(),
+        sessionHistory: [],
+      }),
     ).toBe(true);
   });
 
-  it("includes content matching any selected tag", () => {
-    const c = makeCandidate({
-      id: "c1",
-      userId: "u2",
-      contentTags: [
-        { tag: { slug: "street", id: "t1" }, tagId: "t1", status: "ACTIVE" } as QueueCandidate["contentTags"][0],
-        { tag: { slug: "ramen", id: "t2" }, tagId: "t2", status: "ACTIVE" } as QueueCandidate["contentTags"][0],
-      ],
-    });
+  it("excludes pairs without selected tags", () => {
+    const pair = makePair({ contentId: "c1", tagId: "t1", userId: "u2", tagSlug: "street" });
     expect(
-      isExcludedFromQueue(c, {
+      isExcludedFromQueue(pair, {
         userId: "u1",
         preferences: [],
-        votedContentIds: new Set(),
+        votedPairKeys: new Set(),
+        sessionHistory: [],
+        tagSlugs: ["ramen"],
+      }),
+    ).toBe(true);
+  });
+
+  it("includes pairs matching selected tag", () => {
+    const pair = makePair({ contentId: "c1", tagId: "t2", userId: "u2", tagSlug: "ramen" });
+    expect(
+      isExcludedFromQueue(pair, {
+        userId: "u1",
+        preferences: [],
+        votedPairKeys: new Set(),
         sessionHistory: [],
         tagSlugs: ["ramen", "night"],
-      })
+      }),
     ).toBe(false);
   });
 });
 
-describe("selectNextContent", () => {
+describe("selectNextPair", () => {
   it("returns null when no eligible", () => {
-    const c = makeCandidate({ id: "c1", userId: "u1" });
+    const pair = makePair({ contentId: "c1", tagId: "t1", userId: "u1" });
     expect(
-      selectNextContent([c], { userId: "u1", preferences: [], votedContentIds: new Set(), sessionHistory: [] })
+      selectNextPair([pair], {
+        userId: "u1",
+        preferences: [],
+        votedPairKeys: new Set(),
+        sessionHistory: [],
+      }),
     ).toBeNull();
   });
 
-  it("selects eligible content", () => {
-    const c = makeCandidate({ id: "c1", userId: "u2" });
-    const result = selectNextContent([c], {
+  it("selects eligible pair", () => {
+    const pair = makePair({ contentId: "c1", tagId: "t1", userId: "u2" });
+    const result = selectNextPair([pair], {
       userId: "u1",
       preferences: [],
-      votedContentIds: new Set(),
+      votedPairKeys: new Set(),
       sessionHistory: [],
     });
-    expect(result?.id).toBe("c1");
+    expect(result?.contentId).toBe("c1");
+    expect(result?.tagId).toBe("t1");
+  });
+
+  it("can select another tag on already-voted photo", () => {
+    const child = makePair({ contentId: "c1", tagId: "t-child", userId: "u2", tagSlug: "child" });
+    const interior = makePair({
+      contentId: "c1",
+      tagId: "t-interior",
+      userId: "u2",
+      tagSlug: "interior",
+    });
+    const result = selectNextPair([child, interior], {
+      userId: "u1",
+      preferences: [],
+      votedPairKeys: new Set([pairKey("c1", "t-child")]),
+      sessionHistory: [],
+    });
+    expect(result?.tagId).toBe("t-interior");
   });
 });
 
-describe("buildVotedSet", () => {
-  it("builds set from votes", () => {
-    expect(buildVotedSet([{ contentId: "a" }, { contentId: "b" }])).toEqual(new Set(["a", "b"]));
+describe("buildVotedPairSet", () => {
+  it("builds keys only for tagged votes", () => {
+    expect(
+      buildVotedPairSet([
+        { contentId: "a", sourceTagId: "t1" },
+        { contentId: "b", sourceTagId: null },
+        { contentId: "c", sourceTagId: "t2" },
+      ]),
+    ).toEqual(new Set(["a:t1", "c:t2"]));
   });
 });

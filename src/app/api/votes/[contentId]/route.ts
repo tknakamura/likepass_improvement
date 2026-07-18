@@ -3,16 +3,18 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { updateVoteAggregates } from "@/server/services/content/aggregates";
+import { enqueueJob } from "@/lib/jobs";
 
 const schema = z.object({
   value: z.enum(["LIKE", "PASS"]),
+  sourceTagId: z.string().min(1),
 });
 
 const UNDO_WINDOW_MS = 5000;
 
 export async function PATCH(
   request: Request,
-  { params }: { params: Promise<{ contentId: string }> }
+  { params }: { params: Promise<{ contentId: string }> },
 ) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -27,7 +29,13 @@ export async function PATCH(
   }
 
   const existing = await prisma.vote.findUnique({
-    where: { userId_contentId: { userId: session.user.id, contentId } },
+    where: {
+      userId_contentId_sourceTagId: {
+        userId: session.user.id,
+        contentId,
+        sourceTagId: parsed.data.sourceTagId,
+      },
+    },
   });
 
   if (!existing) {
@@ -45,19 +53,20 @@ export async function PATCH(
     return NextResponse.json({ vote: existing });
   }
 
-  await updateVoteAggregates(contentId, existing.value, parsed.data.value);
-
   const vote = await prisma.vote.update({
     where: { id: existing.id },
     data: { value: parsed.data.value, changedCount: { increment: 1 } },
   });
 
+  await updateVoteAggregates(contentId);
+  await enqueueJob("recalculate_ranking", { tagId: parsed.data.sourceTagId });
+
   return NextResponse.json({ vote });
 }
 
 export async function DELETE(
-  _request: Request,
-  { params }: { params: Promise<{ contentId: string }> }
+  request: Request,
+  { params }: { params: Promise<{ contentId: string }> },
 ) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -65,8 +74,26 @@ export async function DELETE(
   }
 
   const { contentId } = await params;
+  let sourceTagId: string | undefined;
+  try {
+    const body = await request.json();
+    sourceTagId = typeof body?.sourceTagId === "string" ? body.sourceTagId : undefined;
+  } catch {
+    sourceTagId = undefined;
+  }
+
+  if (!sourceTagId) {
+    return NextResponse.json({ error: "sourceTagId is required" }, { status: 400 });
+  }
+
   const existing = await prisma.vote.findUnique({
-    where: { userId_contentId: { userId: session.user.id, contentId } },
+    where: {
+      userId_contentId_sourceTagId: {
+        userId: session.user.id,
+        contentId,
+        sourceTagId,
+      },
+    },
   });
 
   if (!existing) {
@@ -80,8 +107,9 @@ export async function DELETE(
     return NextResponse.json({ error: "Undo window expired" }, { status: 403 });
   }
 
-  await updateVoteAggregates(contentId, existing.value, undefined);
   await prisma.vote.delete({ where: { id: existing.id } });
+  await updateVoteAggregates(contentId);
+  await enqueueJob("recalculate_ranking", { tagId: sourceTagId });
 
   return NextResponse.json({ success: true });
 }

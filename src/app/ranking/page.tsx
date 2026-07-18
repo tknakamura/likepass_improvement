@@ -41,14 +41,11 @@ export default async function RankingIndexPage() {
   if (session?.user?.id) {
     const [voteCount, evaluatedCounts] = await Promise.all([
       prisma.vote.count({ where: { userId: session.user.id } }),
-      prisma.contentTag.groupBy({
-        by: ["tagId"],
+      prisma.vote.groupBy({
+        by: ["sourceTagId"],
         where: {
-          status: { in: activeTagStatuses },
-          content: {
-            ...publishedContentWhere,
-            votes: { some: { userId: session.user.id } },
-          },
+          userId: session.user.id,
+          sourceTagId: { not: null },
         },
         _count: { contentId: true },
       }),
@@ -56,7 +53,9 @@ export default async function RankingIndexPage() {
 
     totalEvaluated = voteCount;
     for (const row of evaluatedCounts) {
-      evaluatedByTagId.set(row.tagId, row._count.contentId);
+      if (row.sourceTagId) {
+        evaluatedByTagId.set(row.sourceTagId, row._count.contentId);
+      }
     }
   }
 

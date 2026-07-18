@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { buildVotedSet, selectNextContent } from "@/server/services/evaluation/queue";
+import {
+  buildVotedPairSet,
+  pairKey,
+  selectNextPair,
+  type QueuePair,
+} from "@/server/services/evaluation/queue";
 import { getPublicImageUrl } from "@/lib/r2";
 
 export async function GET(request: Request) {
@@ -18,22 +23,37 @@ export async function GET(request: Request) {
         .getAll("tags")
         .flatMap((value) => value.split(","))
         .map((slug) => slug.trim())
-        .filter(Boolean)
+        .filter(Boolean),
     ),
   ];
 
-  const [votes, preferences, candidates] = await Promise.all([
-    prisma.vote.findMany({ where: { userId: session.user.id }, select: { contentId: true } }),
+  const [votes, preferences, pairCandidates] = await Promise.all([
+    prisma.vote.findMany({
+      where: { userId: session.user.id },
+      select: { contentId: true, sourceTagId: true },
+    }),
     prisma.userTagPreference.findMany({ where: { userId: session.user.id } }),
-    prisma.content.findMany({
+    prisma.contentTag.findMany({
       where: {
-        status: { in: ["EXPLORING", "ACTIVE"] },
-        aiSafetyStatus: "SAFE",
+        status: { in: ["PENDING", "ACTIVE"] },
+        ...(uniqueTagSlugs.length > 0 ? { tag: { slug: { in: uniqueTagSlugs } } } : {}),
+        content: {
+          status: { in: ["EXPLORING", "ACTIVE"] },
+          aiSafetyStatus: "SAFE",
+        },
       },
       include: {
-        contentTags: { include: { tag: true }, where: { status: { in: ["PENDING", "ACTIVE"] } } },
+        tag: true,
+        content: {
+          include: {
+            contentTags: {
+              include: { tag: true },
+              where: { status: { in: ["PENDING", "ACTIVE"] } },
+            },
+          },
+        },
       },
-      take: 200,
+      take: 300,
       orderBy: { createdAt: "desc" },
     }),
   ]);
@@ -42,15 +62,18 @@ export async function GET(request: Request) {
     ? await prisma.impression.findMany({
         where: { userId: session.user.id, sessionId },
         orderBy: { shownAt: "asc" },
-        take: 20,
+        take: 40,
       })
     : [];
 
-  const selected = selectNextContent(candidates, {
+  const candidates = pairCandidates as QueuePair[];
+  const selected = selectNextPair(candidates, {
     userId: session.user.id,
     preferences,
-    votedContentIds: buildVotedSet(votes),
-    sessionHistory: impressions.map((i) => i.contentId),
+    votedPairKeys: buildVotedPairSet(votes),
+    sessionHistory: impressions
+      .filter((i) => i.tagId)
+      .map((i) => pairKey(i.contentId, i.tagId!)),
     tagSlugs: uniqueTagSlugs.length > 0 ? uniqueTagSlugs : undefined,
   });
 
@@ -58,20 +81,20 @@ export async function GET(request: Request) {
     return NextResponse.json({ content: null });
   }
 
-  const slugFilter = uniqueTagSlugs.length > 0 ? new Set(uniqueTagSlugs) : null;
-  const contextTag = slugFilter
-    ? selected.contentTags.find((ct) => slugFilter.has(ct.tag.slug))?.tag
-    : selected.contentTags[0]?.tag;
-
-  const imageKey = selected.mediumObjectKey ?? selected.largeObjectKey ?? selected.thumbnailObjectKey;
+  const imageKey =
+    selected.content.mediumObjectKey ??
+    selected.content.largeObjectKey ??
+    selected.content.thumbnailObjectKey;
 
   return NextResponse.json({
     content: {
-      id: selected.id,
+      id: selected.contentId,
       imageUrl: imageKey ? getPublicImageUrl(imageKey) : null,
-      contextTag: contextTag
-        ? { id: contextTag.id, slug: contextTag.slug, displayName: contextTag.displayName }
-        : null,
+      contextTag: {
+        id: selected.tag.id,
+        slug: selected.tag.slug,
+        displayName: selected.tag.displayName,
+      },
     },
   });
 }

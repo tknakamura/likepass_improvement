@@ -9,14 +9,26 @@ export interface UnlockedRanking {
 
 export async function getUnlockedRankingsForVote(
   userId: string,
-  contentId: string
+  contentId: string,
+  sourceTagId: string,
 ): Promise<UnlockedRanking[]> {
-  const contentTags = await prisma.contentTag.findMany({
+  const vote = await prisma.vote.findUnique({
     where: {
-      contentId,
-      status: "ACTIVE",
-      content: { status: "ACTIVE" },
-      currentRank: { not: null, lte: 100 },
+      userId_contentId_sourceTagId: {
+        userId,
+        contentId,
+        sourceTagId,
+      },
+    },
+  });
+  if (!vote) return [];
+
+  const contentTag = await prisma.contentTag.findUnique({
+    where: {
+      contentId_tagId: {
+        contentId,
+        tagId: sourceTagId,
+      },
     },
     include: {
       tag: true,
@@ -24,18 +36,16 @@ export async function getUnlockedRankingsForVote(
     },
   });
 
-  const unlocked: UnlockedRanking[] = [];
+  if (!contentTag) return [];
+  if (contentTag.status !== "ACTIVE" || contentTag.content.status !== "ACTIVE") return [];
+  if (contentTag.currentRank == null || contentTag.currentRank > 100) return [];
+  if (!meetsRankingEligibility(contentTag.likeCount, contentTag.passCount)) return [];
 
-  for (const ct of contentTags) {
-    if (!meetsRankingEligibility(ct.content.likeCount, ct.content.passCount)) continue;
-    if (!ct.currentRank) continue;
-
-    unlocked.push({
-      tagSlug: ct.tag.slug,
-      displayName: ct.tag.displayName,
-      rank: ct.currentRank,
-    });
-  }
-
-  return unlocked.sort((a, b) => a.rank - b.rank);
+  return [
+    {
+      tagSlug: contentTag.tag.slug,
+      displayName: contentTag.tag.displayName,
+      rank: contentTag.currentRank,
+    },
+  ];
 }

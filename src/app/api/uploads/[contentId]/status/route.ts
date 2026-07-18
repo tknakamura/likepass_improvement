@@ -20,11 +20,12 @@ export async function GET(
       npcEvaluations: {
         include: {
           judge: true,
+          tag: true,
         },
-        orderBy: { judge: { sortOrder: "asc" } },
+        orderBy: [{ tagId: "asc" }, { judge: { sortOrder: "asc" } }],
       },
       votes: {
-        select: { value: true },
+        select: { value: true, sourceTagId: true },
       },
     },
   });
@@ -33,7 +34,10 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const npcDone = content.npcEvaluations.length;
+  const tagCount = content.contentTags.filter((ct) => ct.status !== "REMOVED").length;
+  const expectedNpc = Math.max(NPC_JUDGE_COUNT, tagCount * NPC_JUDGE_COUNT);
+  const taggedNpc = content.npcEvaluations.filter((e) => e.tagId != null);
+  const npcDone = taggedNpc.length > 0 ? taggedNpc.length : content.npcEvaluations.length;
   const npcLikeCount = content.npcEvaluations.filter((e) => e.value === "LIKE").length;
   const npcPassCount = content.npcEvaluations.filter((e) => e.value === "PASS").length;
   const humanLikeCount = content.votes.filter((v) => v.value === "LIKE").length;
@@ -43,20 +47,27 @@ export async function GET(
     contentId: content.id,
     status: content.status,
     tags: content.contentTags.map((ct) => ({
+      id: ct.tagId,
       slug: ct.tag.slug,
       displayName: ct.tag.displayName,
       status: ct.status,
+      likeCount: ct.likeCount,
+      passCount: ct.passCount,
+      voteCount: ct.voteCount,
+      likeRate: ct.likeRate,
     })),
     npcReview: {
-      total: NPC_JUDGE_COUNT,
+      total: expectedNpc,
       completed: npcDone,
       likeCount: npcLikeCount,
       passCount: npcPassCount,
       decisions:
-        content.status === "NPC_REVIEWING" && npcDone < NPC_JUDGE_COUNT
+        content.status === "NPC_REVIEWING" && npcDone < expectedNpc
           ? []
           : content.npcEvaluations.map((e) => ({
               judgeId: e.judgeId,
+              tagId: e.tagId,
+              tagSlug: e.tag?.slug ?? null,
               value: e.value,
               commentJa: e.commentJa,
               confidence: e.confidence,

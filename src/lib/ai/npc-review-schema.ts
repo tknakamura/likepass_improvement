@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { NPC_JUDGE_COUNT, SEED_NPC_JUDGES } from "@/lib/seed/data";
 
-export const NPC_REVIEW_PROMPT_VERSION = "npc-review-v1";
+export const NPC_REVIEW_PROMPT_VERSION = "npc-review-v2-tag-scoped";
 export const MAX_NPC_COMMENT_LENGTH = 80;
 
 export type NpcVoteValue = "LIKE" | "PASS";
@@ -18,8 +18,15 @@ export interface NpcJudgeProfile {
   sortOrder: number;
 }
 
+export interface NpcTagContext {
+  id: string;
+  slug: string;
+  displayName: string;
+}
+
 export interface NpcJudgeDecision {
   judgeId: string;
+  tagId?: string;
   value: NpcVoteValue;
   commentJa: string;
   confidence: number;

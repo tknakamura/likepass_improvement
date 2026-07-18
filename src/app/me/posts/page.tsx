@@ -85,12 +85,10 @@ export default async function MePostsPage() {
                   </span>
                 </div>
                 <div className="p-2 space-y-0.5">
-                  {post.voteCount > 0 ? (
-                    <p className="text-xs font-medium tabular-nums">
-                      LIKE {(post.likeRate * 100).toFixed(0)}% · {post.voteCount}票
-                    </p>
+                  {post.likeCount > 0 ? (
+                    <p className="text-xs font-medium tabular-nums">LIKE {post.likeCount}</p>
                   ) : (
-                    <p className="text-xs text-[var(--muted-foreground)]">評価なし</p>
+                    <p className="text-xs text-[var(--muted-foreground)]">LIKE 0</p>
                   )}
                   {tagLabel && (
                     <p className="text-[10px] text-[var(--muted-foreground)] truncate">{tagLabel}</p>

@@ -16,7 +16,7 @@ function getPeriodStart(period: Period): Date | null {
 
 export async function GET(
   request: Request,
-  { params }: { params: Promise<{ tagSlug: string }> }
+  { params }: { params: Promise<{ tagSlug: string }> },
 ) {
   const session = await auth();
   const { tagSlug } = await params;
@@ -31,14 +31,14 @@ export async function GET(
     return NextResponse.json({ error: "Tag not found" }, { status: 404 });
   }
 
-  const votedIds = session?.user?.id
+  const votedContentIds = session?.user?.id
     ? new Set(
         (
           await prisma.vote.findMany({
-            where: { userId: session.user.id },
+            where: { userId: session.user.id, sourceTagId: tag.id },
             select: { contentId: true },
           })
-        ).map((v) => v.contentId)
+        ).map((v) => v.contentId),
       )
     : new Set<string>();
 
@@ -57,27 +57,33 @@ export async function GET(
   const eligible = contentTags
     .filter((ct) =>
       meetsRankingEligibility(
-        ct.content.likeCount,
-        ct.content.passCount,
+        ct.likeCount,
+        ct.passCount,
         configs.ranking.minVotes,
-        configs.ranking.minLikes
-      )
+        configs.ranking.minLikes,
+      ),
     )
     .map((ct) => ({
       ct,
       score: computeRankingScore({
-        likeCount: ct.content.likeCount,
-        passCount: ct.content.passCount,
+        likeCount: ct.likeCount,
+        passCount: ct.passCount,
         publishedAt: ct.content.publishedAt,
         period,
         targetVotes: configs.ranking.targetVotes,
       }),
     }))
-    .sort((a, b) => b.score - a.score);
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      if (b.ct.wilsonLower !== a.ct.wilsonLower) return b.ct.wilsonLower - a.ct.wilsonLower;
+      if (b.ct.voteCount !== a.ct.voteCount) return b.ct.voteCount - a.ct.voteCount;
+      if (b.ct.likeCount !== a.ct.likeCount) return b.ct.likeCount - a.ct.likeCount;
+      return b.ct.content.createdAt.getTime() - a.ct.content.createdAt.getTime();
+    });
 
   const items = eligible.map(({ ct }, index) => {
     const rank = index + 1;
-    const isUnlocked = session?.user ? votedIds.has(ct.contentId) : false;
+    const isUnlocked = session?.user ? votedContentIds.has(ct.contentId) : false;
 
     if (!isUnlocked) {
       return { rank, isUnlocked: false, content: null };
@@ -90,6 +96,8 @@ export async function GET(
       content: {
         id: ct.contentId,
         imageUrl: imageKey ? getPublicImageUrl(imageKey) : null,
+        likeRate: ct.likeRate,
+        voteCount: ct.voteCount,
       },
     };
   });

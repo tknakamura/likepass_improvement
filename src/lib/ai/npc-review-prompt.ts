@@ -1,10 +1,15 @@
-import type { NpcJudgeProfile } from "@/lib/ai/npc-review-schema";
+import type { NpcJudgeProfile, NpcTagContext } from "@/lib/ai/npc-review-schema";
 import { MAX_NPC_COMMENT_LENGTH, NPC_REVIEW_PROMPT_VERSION } from "@/lib/ai/npc-review-schema";
 
-export function buildNpcReviewSystemPrompt(): string {
+export function buildNpcReviewSystemPrompt(tag?: NpcTagContext): string {
+  const tagLine = tag
+    ? `今回の評価文脈はタグ #${tag.slug}（${tag.displayName}）です。このタグとしての魅力だけで LIKE / PASS を判定してください。`
+    : "写真全体の好みだけで LIKE / PASS を判定してください。";
+
   return [
     "あなたは写真評価パネルの司会です。",
     "各国の審査員ペルソナに基づき、写真の好み（構図・光・主題・雰囲気）だけで LIKE または PASS を判定してください。",
+    tagLine,
     "文化的ステレオタイプ、国籍差別、外見への偏見、政治的・宗教的判断は禁止です。",
     "人物の容姿を断定したり、センシティブな属性を推測したりしないでください。",
     `各コメントは日本語で${MAX_NPC_COMMENT_LENGTH}文字以内の短い一文にしてください。`,
@@ -14,7 +19,7 @@ export function buildNpcReviewSystemPrompt(): string {
   ].join("\n");
 }
 
-export function buildNpcReviewUserPrompt(judges: NpcJudgeProfile[]): string {
+export function buildNpcReviewUserPrompt(judges: NpcJudgeProfile[], tag?: NpcTagContext): string {
   const panel = judges
     .map(
       (j) =>
@@ -22,9 +27,16 @@ export function buildNpcReviewUserPrompt(judges: NpcJudgeProfile[]): string {
     )
     .join("\n");
 
+  const contextLines = tag
+    ? [
+        `評価タグ: #${tag.slug}（${tag.displayName}）`,
+        `質問: 「#${tag.slug} としてこの写真を LIKE / PASS するか」を各審査員が独立に判定してください。`,
+        "",
+      ]
+    : ["以下の審査員パネルで画像を評価してください。", ""];
+
   return [
-    "以下の審査員パネルで画像を評価してください。",
-    "",
+    ...contextLines,
     "審査員:",
     panel,
     "",

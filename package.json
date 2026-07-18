@@ -19,6 +19,7 @@
     "db:seed:essentials": "tsx scripts/seed-essentials.ts",
     "worker": "tsx src/worker/index.ts",
     "reprocess:stuck": "tsx scripts/reprocess-stuck.ts",
+    "recompute:aggregates": "tsx scripts/recompute-aggregates.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {

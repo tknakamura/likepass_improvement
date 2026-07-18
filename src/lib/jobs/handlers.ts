@@ -4,7 +4,10 @@ import { getImageAnalysisProvider } from "@/lib/ai/image-analysis";
 import { GENERIC_TAG_SLUGS, MAX_AI_TAGS, normalizeTagSlug } from "@/lib/ai/image-analysis-schema";
 import { getObjectBuffer, putObject } from "@/lib/r2";
 import { readLocalImage, saveLocalImage, isR2Configured } from "@/lib/local-images";
-import { recalculateTagRanking } from "@/server/services/content/aggregates";
+import {
+  recalculateTagRanking,
+  recomputeVoteAggregates,
+} from "@/server/services/content/aggregates";
 import { markNpcReviewFailed, runNpcReview } from "@/server/services/npc/review";
 import { NPC_REVIEW_JOB_OPTIONS, PROCESS_IMAGE_JOB_OPTIONS } from "@/lib/jobs";
 import type { TagCategory } from "@prisma/client";
@@ -287,8 +290,40 @@ export async function startWorker() {
   await requeuePendingImages(b!);
   await requeuePendingNpcReviews(b!);
   await requeueEnvContentIds(b!);
+  await recomputeAggregatesIfRequested();
 
   console.log("LIKEPASS worker started");
+}
+
+async function recomputeAggregatesIfRequested() {
+  const flag = process.env.RECOMPUTE_AGGREGATES?.trim().toLowerCase();
+  if (flag !== "1" && flag !== "true" && flag !== "yes") return;
+
+  console.log("[recompute-aggregates] RECOMPUTE_AGGREGATES enabled; starting full recompute");
+  const contents = await prisma.content.findMany({
+    where: { status: { not: "DELETED" } },
+    select: { id: true },
+    orderBy: { createdAt: "asc" },
+  });
+
+  let done = 0;
+  for (const { id } of contents) {
+    await recomputeVoteAggregates(id);
+    done += 1;
+    if (done % 25 === 0 || done === contents.length) {
+      console.log(`[recompute-aggregates] ${done}/${contents.length}`);
+    }
+  }
+
+  const tags = await prisma.tag.findMany({ select: { id: true, slug: true } });
+  for (const tag of tags) {
+    await recalculateTagRanking(tag.id);
+    console.log(`[recompute-aggregates] ranking refreshed for #${tag.slug}`);
+  }
+
+  console.log(
+    "[recompute-aggregates] done — clear RECOMPUTE_AGGREGATES env var to avoid re-running on every restart",
+  );
 }
 
 function parseReprocessContentIds(raw: string | undefined): string[] {

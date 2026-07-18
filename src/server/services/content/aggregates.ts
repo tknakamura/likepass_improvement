@@ -11,12 +11,37 @@ import type { ContentStatus, ContentTagStatus, Prisma } from "@prisma/client";
 
 type TxClient = Prisma.TransactionClient;
 
-async function countVotesFromSources(contentId: string, tx: TxClient | typeof prisma = prisma) {
+async function countContentTotals(contentId: string, tx: TxClient | typeof prisma = prisma) {
   const [humanLikes, humanPasses, npcLikes, npcPasses] = await Promise.all([
     tx.vote.count({ where: { contentId, value: "LIKE" } }),
     tx.vote.count({ where: { contentId, value: "PASS" } }),
     tx.npcEvaluation.count({ where: { contentId, value: "LIKE" } }),
     tx.npcEvaluation.count({ where: { contentId, value: "PASS" } }),
+  ]);
+
+  const likeCount = humanLikes + npcLikes;
+  const passCount = humanPasses + npcPasses;
+  return {
+    likeCount,
+    passCount,
+    voteCount: likeCount + passCount,
+    humanLikeCount: humanLikes,
+    humanPassCount: humanPasses,
+    npcLikeCount: npcLikes,
+    npcPassCount: npcPasses,
+  };
+}
+
+async function countTagVotes(
+  contentId: string,
+  tagId: string,
+  tx: TxClient | typeof prisma = prisma,
+) {
+  const [humanLikes, humanPasses, npcLikes, npcPasses] = await Promise.all([
+    tx.vote.count({ where: { contentId, sourceTagId: tagId, value: "LIKE" } }),
+    tx.vote.count({ where: { contentId, sourceTagId: tagId, value: "PASS" } }),
+    tx.npcEvaluation.count({ where: { contentId, tagId, value: "LIKE" } }),
+    tx.npcEvaluation.count({ where: { contentId, tagId, value: "PASS" } }),
   ]);
 
   const likeCount = humanLikes + npcLikes;
@@ -39,7 +64,6 @@ function resolveLifecycleStatus(
   dormant: Awaited<ReturnType<typeof getAppConfigs>>["dormant"],
   ranking: Awaited<ReturnType<typeof getAppConfigs>>["ranking"],
 ): ContentStatus {
-  // Do not advance lifecycle while still in pre-publish pipeline.
   if (
     currentStatus === "UPLOADING" ||
     currentStatus === "PROCESSING" ||
@@ -66,8 +90,7 @@ function resolveLifecycleStatus(
 }
 
 /**
- * Recomputes Content + ContentTag aggregates from authoritative Vote and NpcEvaluation rows.
- * Safe under concurrent updates (no lost increments).
+ * Recomputes Content totals (all votes) and ContentTag aggregates (tag-scoped votes only).
  */
 export async function recomputeVoteAggregates(contentId: string, tx?: TxClient) {
   const run = async (client: TxClient | typeof prisma) => {
@@ -75,13 +98,13 @@ export async function recomputeVoteAggregates(contentId: string, tx?: TxClient) 
     const content = await client.content.findUnique({ where: { id: contentId } });
     if (!content) return null;
 
-    const counts = await countVotesFromSources(contentId, client);
-    const likeRate = computeLikeRate(counts.likeCount, counts.passCount);
-    const wilsonLower = wilsonLowerBound(counts.likeCount, counts.passCount);
+    const totals = await countContentTotals(contentId, client);
+    const likeRate = computeLikeRate(totals.likeCount, totals.passCount);
+    const wilsonLower = wilsonLowerBound(totals.likeCount, totals.passCount);
     const status = resolveLifecycleStatus(
       content.status,
-      counts.likeCount,
-      counts.passCount,
+      totals.likeCount,
+      totals.passCount,
       configs.dormant,
       configs.ranking,
     );
@@ -89,9 +112,9 @@ export async function recomputeVoteAggregates(contentId: string, tx?: TxClient) 
     await client.content.update({
       where: { id: contentId },
       data: {
-        likeCount: counts.likeCount,
-        passCount: counts.passCount,
-        voteCount: counts.voteCount,
+        likeCount: totals.likeCount,
+        passCount: totals.passCount,
+        voteCount: totals.voteCount,
         likeRate,
         wilsonLower,
         status,
@@ -100,43 +123,50 @@ export async function recomputeVoteAggregates(contentId: string, tx?: TxClient) 
 
     const contentTags = await client.contentTag.findMany({ where: { contentId } });
     for (const ct of contentTags) {
+      const tagCounts = await countTagVotes(contentId, ct.tagId, client);
+      const tagLikeRate = computeLikeRate(tagCounts.likeCount, tagCounts.passCount);
+      const tagWilson = wilsonLowerBound(tagCounts.likeCount, tagCounts.passCount);
       const rankingScore = computeRankingScore({
-        likeCount: counts.likeCount,
-        passCount: counts.passCount,
+        likeCount: tagCounts.likeCount,
+        passCount: tagCounts.passCount,
         publishedAt: content.publishedAt,
         targetVotes: configs.ranking.targetVotes,
       });
 
-      let tagStatus: ContentTagStatus = ct.status;
-      if (ct.status !== "REMOVED") {
-        if (shouldBecomeDormant(counts.likeCount, counts.passCount, configs.dormant)) {
-          tagStatus = "DORMANT";
-        } else if (
-          meetsRankingEligibility(
-            counts.likeCount,
-            counts.passCount,
-            configs.ranking.minVotes,
-            configs.ranking.minLikes,
-          ) &&
-          status === "ACTIVE"
-        ) {
-          tagStatus = "ACTIVE";
-        }
+      let tagStatus: ContentTagStatus;
+      if (ct.status === "REMOVED") {
+        tagStatus = "REMOVED";
+      } else if (shouldBecomeDormant(tagCounts.likeCount, tagCounts.passCount, configs.dormant)) {
+        tagStatus = "DORMANT";
+      } else if (
+        status === "ACTIVE" &&
+        meetsRankingEligibility(
+          tagCounts.likeCount,
+          tagCounts.passCount,
+          configs.ranking.minVotes,
+          configs.ranking.minLikes,
+        )
+      ) {
+        tagStatus = "ACTIVE";
+      } else {
+        tagStatus = "PENDING";
       }
 
       await client.contentTag.update({
         where: { id: ct.id },
         data: {
-          likeCount: counts.likeCount,
-          passCount: counts.passCount,
-          voteCount: counts.voteCount,
+          likeCount: tagCounts.likeCount,
+          passCount: tagCounts.passCount,
+          voteCount: tagCounts.voteCount,
+          likeRate: tagLikeRate,
+          wilsonLower: tagWilson,
           rankingScore,
           status: tagStatus,
         },
       });
     }
 
-    return { ...counts, likeRate, wilsonLower, status };
+    return { ...totals, likeRate, wilsonLower, status };
   };
 
   if (tx) return run(tx);
@@ -192,8 +222,8 @@ export async function recalculateTagRanking(
   const eligible = contentTags
     .filter((ct) =>
       meetsRankingEligibility(
-        ct.content.likeCount,
-        ct.content.passCount,
+        ct.likeCount,
+        ct.passCount,
         configs.ranking.minVotes,
         configs.ranking.minLikes,
       ),
@@ -201,8 +231,8 @@ export async function recalculateTagRanking(
     .map((ct) => ({
       ...ct,
       rankingScore: computeRankingScore({
-        likeCount: ct.content.likeCount,
-        passCount: ct.content.passCount,
+        likeCount: ct.likeCount,
+        passCount: ct.passCount,
         publishedAt: ct.content.publishedAt,
         period,
         targetVotes: configs.ranking.targetVotes,
@@ -211,7 +241,7 @@ export async function recalculateTagRanking(
 
   eligible.sort((a, b) => {
     if (b.rankingScore !== a.rankingScore) return b.rankingScore - a.rankingScore;
-    if (b.content.wilsonLower !== a.content.wilsonLower) return b.content.wilsonLower - a.content.wilsonLower;
+    if (b.wilsonLower !== a.wilsonLower) return b.wilsonLower - a.wilsonLower;
     if (b.voteCount !== a.voteCount) return b.voteCount - a.voteCount;
     if (b.likeCount !== a.likeCount) return b.likeCount - a.likeCount;
     return b.content.createdAt.getTime() - a.content.createdAt.getTime();
@@ -233,7 +263,7 @@ export async function recalculateTagRanking(
           rank,
           score: ct.rankingScore,
           voteCount: ct.voteCount,
-          likeRate: ct.content.likeRate,
+          likeRate: ct.likeRate,
         },
       });
     }
